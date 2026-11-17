@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 6 * * 1"   # weekly: catches Roblox API changes early
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv -e ".[dev]"
+      - name: Unit tests
+        run: uv run --python .venv pytest -q
+      - name: Live Roblox API check
+        run: uv run --python .venv python -c "from roxai import roblox_api as R; c=R.get_chart('top-trending', 5); assert c, 'empty chart'; d=R.game_details(c[0].universe_id); print(c[0].name, d.visits, len(d.game_passes), len(d.dev_products)); assert d.name"
+      - name: Windows smoke test (real Win32 input/capture/scheduler)
+        if: runner.os == 'Windows'
+        run: uv run --python .venv python tests/win_smoke.py
+      - name: Upload capture
+        if: runner.os == 'Windows' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-capture
+          path: ${{ runner.temp }}/roxai-capture.jpg
+          if-no-files-found: ignore
+
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run INSTALL (CI mode)
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -CI
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Verify install
+        shell: pwsh
+        run: |
+          $py = "$env:LOCALAPPDATA\ROX-AI\venv\Scripts\python.exe"
+          & $py -m roxai.cli doctor
+          & $py -m roxai.cli queue
+          if (-not (Test-Path "$env:USERPROFILE\Documents\ROX-AI Vault\00 Dashboard.md")) { throw "vault missing" }
+          Get-ChildItem "$env:USERPROFILE\Documents\ROX-AI Vault\02 Games" | Select-Object -First 5
+          schtasks /Query /TN "ROX-AI\Daily Chart Scan"
+          schtasks /Query /TN "ROX-AI\Weekly Playtests"
+          Get-Content "$env:APPDATA\Claude\claude_desktop_config.json"
