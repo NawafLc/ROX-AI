@@ -30,7 +30,7 @@ def client() -> httpx.Client:
     return _client
 
 
-def get_json(url: str, params: dict | None = None, tries: int = 5) -> Any:
+def get_json(url: str, params: dict | None = None, tries: int = 5, max_wait: float = 30) -> Any:
     """GET with retries. Raises the last error only if every attempt failed."""
     last: Exception | None = None
     for attempt in range(tries):
@@ -39,14 +39,16 @@ def get_json(url: str, params: dict | None = None, tries: int = 5) -> Any:
             if r.status_code == 429 or r.status_code >= 500:
                 wait = float(r.headers.get("retry-after") or 0) or (2 ** attempt + random.random())
                 L.warning("HTTP %s from %s, retrying in %.1fs", r.status_code, url, wait)
-                time.sleep(min(wait, 30))
+                if attempt < tries - 1:
+                    time.sleep(min(wait, max_wait))
                 last = httpx.HTTPStatusError(f"{r.status_code}", request=r.request, response=r)
                 continue
             r.raise_for_status()
             return r.json()
         except (httpx.TransportError, ValueError) as e:  # network / bad JSON
             last = e
-            time.sleep(min(2 ** attempt + random.random(), 30))
+            if attempt < tries - 1:
+                time.sleep(min(2 ** attempt + random.random(), max_wait))
         except httpx.HTTPStatusError as e:
             # 4xx other than 429: not worth retrying
             raise e
@@ -281,7 +283,8 @@ def badges(universe_id: int, max_pages: int = 3) -> tuple[list[dict], int]:
 
 
 def server_sample(place_id: int) -> dict:
-    data = get_json(f"https://games.roblox.com/v1/games/{place_id}/servers/Public", {"limit": 100})
+    # optional data and heavily rate-limited: fail fast instead of slowing the whole scan
+    data = get_json(f"https://games.roblox.com/v1/games/{place_id}/servers/Public", {"limit": 100}, tries=2, max_wait=3)
     servers = data.get("data") or []
     if not servers:
         return {}

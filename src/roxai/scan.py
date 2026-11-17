@@ -111,14 +111,19 @@ def _scan(limit: int) -> dict:
         raise RuntimeError("Roblox returned an empty chart (API change or outage) — will retry next run")
     L.info("chart %s: %d games", s.sort_id, len(main))
 
-    rows: list[dict] = []
-    for e in main:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(e: R.ChartEntry) -> dict:
         try:
-            rows.append(_process_game(e, day))
+            return _process_game(e, day)
         except Exception as ex:  # noqa: BLE001 - one bad game never kills the scan
             L.error("game %s failed: %s", e.universe_id, traceback.format_exc())
-            rows.append({"universe_id": e.universe_id, "rank": e.rank, "title": V.clean_display_name(e.name),
-                         "genre": e.genre, "playing": e.playing, "note": None, "error": str(ex)})
+            return {"universe_id": e.universe_id, "rank": e.rank, "title": V.clean_display_name(e.name),
+                    "genre": e.genre, "playing": e.playing, "note": None, "error": str(ex)}
+
+    # a few games in parallel: Roblox APIs are slow per call but tolerate light concurrency
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        rows = sorted(pool.map(one, main), key=lambda r: r["rank"])
 
     # extra charts — snapshots for trend history + short tables
     extra: dict[str, list[dict]] = {}

@@ -34,6 +34,14 @@ from roxai.winctl import capture as C, input as IN, roblox as RB, window as W  #
 from roxai.winctl.humanmon import HumanInputMonitor  # noqa: E402
 
 W.make_dpi_aware()
+def _blocked():
+    try:
+        IN._key_input("alt", False)
+        return False
+    except IN.InputError:
+        return True
+
+
 check("INPUT struct size (x64=40)", lambda: ctypes.sizeof(IN.INPUT) if ctypes.sizeof(IN.INPUT) == (40 if sys.maxsize > 2**32 else 28) else (_ for _ in ()).throw(AssertionError(ctypes.sizeof(IN.INPUT))))
 check("screen size", W.screen_size)
 check("idle seconds", W.idle_seconds)
@@ -45,13 +53,6 @@ check("roblox installed?", RB.is_installed, hard=False)
 check("hotkey poll", lambda: W.hotkey_down("ctrl+shift+q"))
 check("forbidden key blocked", lambda: (_ for _ in ()).throw(AssertionError("not blocked")) if not _blocked() else "blocked")
 
-
-def _blocked():
-    try:
-        IN._key_input("alt", False)
-        return False
-    except IN.InputError:
-        return True
 
 
 def human_monitor():
