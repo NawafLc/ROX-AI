@@ -119,6 +119,26 @@ jobs:
           schtasks /Query /TN "ROX-AI\Daily Chart Scan" 2>$null
           if ($LASTEXITCODE -eq 0) { throw "schedule still there" }
           if ((Get-Content "$env:APPDATA\Claude\claude_desktop_config.json" -Raw) -match '"roxai"') { throw "Claude Desktop still connected" }
+          exit 0
+      - name: Single-file ROX-AI.exe works on its own (no roxai.exe beside it)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force solo | Out-Null
+          Copy-Item user\ROX-AI\ROX-AI.exe solo\
+          $req = @(
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+          ) -join "`n"
+          Set-Content solo\in.txt $req
+          Start-Process solo\ROX-AI.exe -ArgumentList "mcp" -RedirectStandardInput solo\in.txt -RedirectStandardOutput solo\out.txt -Wait -NoNewWindow
+          $out = Get-Content solo\out.txt -Raw
+          if (-not ($out -match 'playtest_start')) { throw "single exe MCP failed: $out" }
+          Start-Process solo\ROX-AI.exe -ArgumentList "setup" -Wait
+          if (-not (Test-Path "solo\data\settings.json")) { throw "single exe not portable" }
+          $cfg = Get-Content "$env:APPDATA\Claude\claude_desktop_config.json" -Raw
+          if ($cfg -notmatch 'ROX-AI.exe') { throw "Claude not pointed at the single exe: $cfg" }
+          & user\ROX-AI\roxai.exe remove | Out-Null
+          exit 0
 
   release:
     needs: [portable, linux]
@@ -128,13 +148,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: ROX-AI-windows-x64
+      - name: Single-file download too
+        run: unzip -j ROX-AI-windows-x64.zip 'ROX-AI/ROX-AI.exe' -d .
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.0.${{ github.run_number }}
           name: ROX-AI v2.0.${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: "true"
-          files: ROX-AI-windows-x64.zip
+          files: |
+            ROX-AI-windows-x64.zip
+            ROX-AI.exe
           body: |
-            **Download `ROX-AI-windows-x64.zip`, unzip it anywhere, double-click `ROX-AI.exe`.** Portable: nothing is installed.
+            **Download `ROX-AI.exe` and double-click it** — a setup wizard walks you through everything. Portable: nothing is installed into Windows.
+            (`ROX-AI-windows-x64.zip` has the same app plus a command-line helper.)
             Built from ${{ github.sha }} (branch ${{ github.ref_name }}). Tested on Windows: unit/integration tests, Win32 self-test, portable first start, MCP handshake, removal.

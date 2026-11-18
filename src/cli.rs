@@ -15,6 +15,9 @@ use std::time::Duration;
 pub struct Cli {
     #[command(subcommand)]
     pub cmd: Option<Cmd>,
+    /// (internal) set by the setup wizard after moving the app: clean up the old folder
+    #[arg(long, hide = true)]
+    pub moved_from: Option<std::path::PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -87,6 +90,9 @@ pub fn run() -> i32 {
     let cli = Cli::parse();
     let mut ctx = Ctx::load();
     crate::logx::init(&ctx.logs_dir());
+    if let Some(old) = cli.moved_from.clone() {
+        std::thread::spawn(move || crate::relocate::finish_move(&old));
+    }
     match dispatch(&mut ctx, cli.cmd.unwrap_or(Cmd::Panel)) {
         Ok(code) => code,
         Err(e) => {

@@ -12,6 +12,7 @@ pub mod deps;
 pub mod doctor;
 pub mod mcp;
 pub mod panel;
+pub mod relocate;
 pub mod scan;
 pub mod selftest;
 pub mod session;

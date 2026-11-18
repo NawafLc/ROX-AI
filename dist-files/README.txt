@@ -1,7 +1,7 @@
 ROX-AI  -  portable app
 =======================
 
-Double-click  ROX-AI.exe  . That's it.
+Double-click  ROX-AI.exe  . A setup wizard walks you through everything.
 
 - Nothing is installed: everything (settings, history, your Obsidian vault) lives in this folder.
   Put the folder anywhere you like - Desktop, Documents, a USB stick.

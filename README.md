@@ -10,17 +10,20 @@ ROX-AI is written in **Rust**: one small, fast, self-contained `roxai.exe` (no P
 
 ---
 
-## Get started (portable — nothing is installed)
+## Get started
 
-1. Download **`ROX-AI-windows-x64.zip`** from the latest **Release** (right side of the GitHub page).
-2. Unzip it anywhere (Desktop, Documents, a USB stick…).
-3. Double-click **`ROX-AI.exe`**.
+1. Download **`ROX-AI.exe`** from the latest **Release** (right side of the GitHub page).
+2. Double-click it. A **setup wizard** walks you through everything:
+   - **Location**: keep ROX-AI where it is, or move it to a folder of your choice (recommended if it's in
+     Downloads), with optional Desktop / Start-menu shortcuts.
+   - **Apps**: shows what you already have (Obsidian, Roblox, Claude Code, Claude Desktop); anything missing installs
+     with one click and a progress bar.
+   - **Accounts**: sign in to your Roblox **alt** and to Claude (each opens your browser, turns green by itself).
+   - **Preferences**: run automatically, games per week, minutes per game.
 
-The app checks what's already on your PC (Obsidian, Roblox, Claude Code, Claude Desktop) and shows a one-click
-**Install** or **Sign in** button only for what's missing. No console windows, no installer.
-Everything ROX-AI creates — settings, history and your Obsidian vault — stays **inside that folder**.
-The only things it registers on the PC are the Claude connection and (if "Run automatically" is on) two scheduled
-tasks; **More → Remove from this PC** undoes both, then you just delete the folder.
+ROX-AI is **portable**: settings, history and your Obsidian vault live in its own folder. No installer, no console
+windows. The only things it registers in Windows are the Claude connection and (if "Run automatically" is on) two
+scheduled tasks; **More → Remove from this PC** undoes both, then just delete the folder.
 
 ## What happens automatically
 

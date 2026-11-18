@@ -4,8 +4,8 @@
 
 use crate::config::Ctx;
 use crate::util::run_capture;
-use anyhow::{bail, Result};
-use std::path::PathBuf;
+use anyhow::{bail, Context, Result};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +131,19 @@ pub fn status(ctx: &Ctx) -> Vec<Dep> {
     ]
 }
 
-fn winget(id: &str) -> Result<()> {
+/// Progress callback: (what's happening, optional 0..1 progress).
+pub type Report<'a> = &'a dyn Fn(&str, Option<f32>);
+
+fn have_winget() -> bool {
+    cfg!(windows)
+        && run_capture("winget", &["--version"], Duration::from_secs(20)).is_ok_and(|(c, _)| c == 0)
+}
+
+fn winget(id: &str, name: &str, report: Report) -> Result<()> {
+    report(
+        &format!("Installing {name} with Windows Package Manager…"),
+        None,
+    );
     let (code, out) = run_capture(
         "winget",
         &[
@@ -142,6 +154,7 @@ fn winget(id: &str) -> Result<()> {
             "--silent",
             "--accept-package-agreements",
             "--accept-source-agreements",
+            "--disable-interactivity",
         ],
         Duration::from_secs(20 * 60),
     )?;
@@ -151,106 +164,221 @@ fn winget(id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Perform an install / sign-in. Blocking (run it on a background thread). Returns a short message.
-pub fn act(ctx: &Ctx, id: &str, action: Action) -> Result<String> {
-    match (id, action) {
-        ("obsidian", Action::Install) => match winget("Obsidian.Obsidian") {
-            Ok(()) => Ok("Obsidian installed.".into()),
-            Err(_) => {
-                crate::util::open_path("https://obsidian.md/download");
-                Ok("Opened the Obsidian download page — run the installer, then come back.".into())
-            }
-        },
-        ("roblox", Action::Install) => match winget("Roblox.Roblox") {
-            Ok(()) => Ok("Roblox installed.".into()),
-            Err(_) => {
-                crate::util::open_path("https://www.roblox.com/download");
-                Ok("Opened the Roblox download page — run it, then come back.".into())
-            }
-        },
-        ("roblox_login", Action::SignIn) => {
-            // Sign in on the website, then open any game once: the Roblox app takes over the login.
-            crate::util::open_path("https://www.roblox.com/login");
-            Ok("Sign in with your ALT account in the browser, then press Play on any game once and close it.".into())
+fn agent() -> Result<ureq::Agent> {
+    Ok(ureq::AgentBuilder::new()
+        .tls_connector(std::sync::Arc::new(native_tls::TlsConnector::new()?))
+        .try_proxy_from_env(true)
+        .timeout_connect(Duration::from_secs(30))
+        .user_agent("ROX-AI-setup")
+        .build())
+}
+
+/// Download with a progress bar into the temp folder.
+fn download(url: &str, file: &str, name: &str, report: Report) -> Result<PathBuf> {
+    use std::io::{Read, Write};
+    report(&format!("Downloading {name}…"), Some(0.0));
+    let resp = agent()?
+        .get(url)
+        .call()
+        .map_err(|e| anyhow::anyhow!("download failed: {e}"))?;
+    let total: Option<u64> = resp.header("content-length").and_then(|v| v.parse().ok());
+    let path = std::env::temp_dir().join(file);
+    let mut out = std::fs::File::create(&path)?;
+    let mut rd = resp.into_reader();
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut got: u64 = 0;
+    loop {
+        let n = rd.read(&mut buf)?;
+        if n == 0 {
+            break;
         }
-        ("claude_desktop", Action::Install) => match winget("Anthropic.Claude") {
-            Ok(()) => Ok("Claude Desktop installed — open it once and sign in.".into()),
-            Err(_) => {
-                crate::util::open_path("https://claude.ai/download");
-                Ok("Opened the Claude Desktop download page.".into())
-            }
-        },
-        ("claude_code", Action::Install) => {
-            #[cfg(windows)]
+        out.write_all(&buf[..n])?;
+        got += n as u64;
+        let mb = got as f64 / 1_048_576.0;
+        match total {
+            Some(t) if t > 0 => report(
+                &format!(
+                    "Downloading {name}… {mb:.0} / {:.0} MB",
+                    t as f64 / 1_048_576.0
+                ),
+                Some(got as f32 / t as f32),
+            ),
+            _ => report(&format!("Downloading {name}… {mb:.0} MB"), None),
+        }
+    }
+    Ok(path)
+}
+
+fn run_installer(path: &Path, args: &[&str], name: &str, report: Report) -> Result<()> {
+    report(&format!("Installing {name}…"), None);
+    let st = std::process::Command::new(path)
+        .args(args)
+        .status()
+        .with_context(|| format!("couldn't start the {name} installer"))?;
+    if !st.success() {
+        bail!("{name} installer exited with {st}");
+    }
+    Ok(())
+}
+
+fn obsidian_download_url() -> Result<String> {
+    let v: serde_json::Value = agent()?
+        .get("https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest")
+        .call()?
+        .into_json()?;
+    v["assets"]
+        .as_array()
+        .and_then(|a| {
+            a.iter().find(|x| {
+                x["name"].as_str().is_some_and(|n| {
+                    n.starts_with("Obsidian-") && n.ends_with(".exe") && !n.contains("arm")
+                })
+            })
+        })
+        .and_then(|x| x["browser_download_url"].as_str())
+        .map(String::from)
+        .ok_or_else(|| anyhow::anyhow!("no Obsidian installer in the latest release"))
+}
+
+fn wait_until(check: impl Fn() -> bool, secs: u64) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(secs) {
+        if check() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    check()
+}
+
+/// Perform an install / sign-in. Blocking (run it on a background thread). Returns a short message.
+pub fn act(ctx: &Ctx, id: &str, action: Action, report: Report) -> Result<String> {
+    if !cfg!(windows) && action == Action::Install {
+        bail!("installing apps is only supported on Windows");
+    }
+    let wg = action == Action::Install && have_winget();
+    match (id, action) {
+        ("obsidian", Action::Install) => {
+            if !(wg
+                && winget("Obsidian.Obsidian", "Obsidian", report).is_ok()
+                && crate::setup::obsidian_exe().is_some())
             {
-                let (code, out) = run_capture(
-                    "powershell",
-                    &[
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-WindowStyle",
-                        "Hidden",
-                        "-Command",
-                        "irm https://claude.ai/install.ps1 | iex",
-                    ],
-                    Duration::from_secs(15 * 60),
+                let url = obsidian_download_url()?;
+                let f = download(&url, "Obsidian-setup.exe", "Obsidian", report)?;
+                run_installer(&f, &["/S"], "Obsidian", report)?;
+            }
+            if !wait_until(|| crate::setup::obsidian_exe().is_some(), 60) {
+                bail!("Obsidian didn't finish installing");
+            }
+            let _ = crate::setup::register_obsidian_vault(ctx);
+            Ok("Obsidian is installed.".into())
+        }
+        ("roblox", Action::Install) => {
+            if !(wg
+                && winget("Roblox.Roblox", "Roblox", report).is_ok()
+                && crate::win::roblox::is_installed())
+            {
+                let f = download(
+                    "https://www.roblox.com/download/client?os=win",
+                    "RobloxPlayerInstaller.exe",
+                    "Roblox",
+                    report,
                 )?;
-                if crate::autopilot::find_claude(ctx).is_none() {
-                    bail!(
-                        "Claude Code install did not finish ({code}): {}",
-                        out.chars()
-                            .rev()
-                            .take(200)
-                            .collect::<String>()
-                            .chars()
-                            .rev()
-                            .collect::<String>()
-                    );
-                }
-                let _ = crate::setup::register_claude_code(ctx);
-                Ok("Claude Code installed. Next: sign in.".into())
+                report("Installing Roblox (its own window may appear)…", None);
+                let _ = std::process::Command::new(&f).spawn();
             }
-            #[cfg(not(windows))]
-            {
-                bail!("install Claude Code from https://claude.ai/download")
+            if !wait_until(crate::win::roblox::is_installed, 600) {
+                bail!("Roblox didn't finish installing");
+            }
+            crate::win::roblox::kill_all(); // the installer opens Roblox afterwards; close it
+            Ok("Roblox is installed.".into())
+        }
+        ("claude_desktop", Action::Install) => {
+            let ok = (wg
+                && winget("Anthropic.Claude", "Claude Desktop", report).is_ok()
+                && claude_desktop_installed())
+                || download(
+                    "https://claude.ai/api/desktop/win32/x64/exe/latest/redirect",
+                    "Claude-Setup.exe",
+                    "Claude Desktop",
+                    report,
+                )
+                .and_then(|f| run_installer(&f, &[], "Claude Desktop", report))
+                .is_ok_and(|_| wait_until(claude_desktop_installed, 120));
+            if !ok {
+                crate::util::open_path("https://claude.ai/download");
+                bail!("couldn't install automatically — the download page is open");
+            }
+            let _ = crate::setup::register_claude_desktop(ctx);
+            Ok("Claude Desktop is installed — open it once and sign in.".into())
+        }
+        ("claude_code", Action::Install) => {
+            report("Installing Claude Code…", None);
+            let (code, out) = run_capture(
+                "powershell",
+                &[
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    "irm https://claude.ai/install.ps1 | iex",
+                ],
+                Duration::from_secs(15 * 60),
+            )?;
+            if crate::autopilot::find_claude(ctx).is_none() {
+                let tail: String = out
+                    .chars()
+                    .rev()
+                    .take(200)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect();
+                bail!("Claude Code install did not finish ({code}): {tail}");
+            }
+            let _ = crate::setup::register_claude_code(ctx);
+            Ok("Claude Code is installed. Next: sign in.".into())
+        }
+        ("roblox_login", Action::SignIn) => {
+            report("Waiting for you to sign in to Roblox…", None);
+            // sign in on the website, then any game's Play button hands the login to the Roblox app
+            crate::util::open_path("https://www.roblox.com/login");
+            if wait_until(roblox_signed_in, 600) {
+                crate::win::roblox::kill_all();
+                Ok("Signed in to Roblox.".into())
+            } else {
+                Ok("After signing in on the website, press Play on any game once so the Roblox app remembers you.".into())
             }
         }
         ("claude_login", Action::SignIn) => {
             let Some(c) = crate::autopilot::find_claude(ctx) else {
                 bail!("Install Claude Code first")
             };
-            // opens your browser; we wait in the background until the login completes
+            report("Finish signing in to Claude in your browser…", None);
             let mut child = crate::util::hidden_command(&c)
                 .args(["auth", "login"])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()?;
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(300) {
-                std::thread::sleep(Duration::from_secs(3));
-                if claude_signed_in(ctx) {
-                    let _ = child.kill();
-                    if ctx.store.get("blocked_reason").is_some_and(|b| {
-                        b["reason"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_lowercase()
-                            .contains("claude")
-                    }) {
-                        let _ = ctx.store.set("blocked_reason", serde_json::Value::Null);
-                    }
-                    return Ok("Signed in to Claude.".into());
-                }
-                if let Ok(Some(_)) = child.try_wait() {
-                    if claude_signed_in(ctx) {
-                        return Ok("Signed in to Claude.".into());
-                    }
-                }
-            }
+            let ok = wait_until(|| claude_signed_in(ctx), 300);
             let _ = child.kill();
-            bail!("Sign-in wasn't completed in the browser (try again)")
+            if !ok {
+                bail!("sign-in wasn't completed in the browser — try again");
+            }
+            if ctx.store.get("blocked_reason").is_some_and(|b| {
+                b["reason"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains("claude")
+            }) {
+                let _ = ctx.store.set("blocked_reason", serde_json::Value::Null);
+            }
+            Ok("Signed in to Claude.".into())
         }
         _ => bail!("nothing to do for {id}"),
     }
