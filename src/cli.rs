@@ -77,6 +77,15 @@ pub enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Search YouTube, or read one video (`--video <id or url>`)
+    #[command(hide = true)]
+    Youtube {
+        query: Option<String>,
+        #[arg(long)]
+        video: Option<String>,
+    },
+    /// Learn one game now from YouTube videos (via Claude Code)
+    Learn { universe_id: u64 },
     /// Windows self-test of input, capture, hooks and scheduler (used by CI)
     Selftest,
 }
@@ -184,6 +193,27 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
                 crate::autopilot::notify(ctx, "ROX-AI update", &msg);
                 print(msg);
             }
+        }
+        Cmd::Youtube { query, video } => match video {
+            Some(v) => print(pretty(&serde_json::to_value(crate::youtube::video(
+                &v,
+                &ctx.tools_dir(),
+            )?)?)),
+            None => print(pretty(&serde_json::to_value(crate::youtube::search(
+                &query.unwrap_or_default(),
+                8,
+            )?)?)),
+        },
+        Cmd::Learn { universe_id } => {
+            let api = HttpApi::new()?;
+            print(pretty(&crate::autopilot::run(
+                ctx,
+                &api,
+                true,
+                None,
+                Some(universe_id),
+                Duration::from_secs(60),
+            )));
         }
         Cmd::Selftest => return Ok(crate::selftest::run(ctx)),
     }

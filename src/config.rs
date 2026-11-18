@@ -88,6 +88,15 @@ pub struct Settings {
     pub stop_on_human_input: bool,
     /// daily scan + weekly playtests in the background (Windows scheduled tasks); off = only when you click
     pub auto_run: bool,
+    /// "passive" = only track chart data · "active" = Claude also learns each game (from YouTube videos)
+    pub mode: String,
+    /// AI playtesting on the real Roblox client (turned off for now; video learning replaces it)
+    pub playtesting_enabled: bool,
+    /// games Claude learns per run, how often learning runs, and when to re-learn a game
+    pub learn_per_run: usize,
+    pub learn_interval_days: f64,
+    pub reanalyze_after_days: f64,
+    pub videos_per_game: usize,
 }
 
 impl Default for Settings {
@@ -118,6 +127,12 @@ impl Default for Settings {
             allow_chat: false,
             stop_on_human_input: true,
             auto_run: true,
+            mode: "active".into(),
+            playtesting_enabled: false,
+            learn_per_run: 5,
+            learn_interval_days: 1.0,
+            reanalyze_after_days: 30.0,
+            videos_per_game: 4,
         }
     }
 }
@@ -210,6 +225,15 @@ impl Ctx {
     }
 
     /// The Obsidian vault: settings.vault_path if set, else "ROX-AI Vault" beside the data folder.
+    pub fn is_active(&self) -> bool {
+        self.settings.mode != "passive"
+    }
+
+    /// ROX-AI's own helper tools (e.g. the video reader) — inside the portable data folder.
+    pub fn tools_dir(&self) -> PathBuf {
+        self.home.join("tools")
+    }
+
     pub fn vault(&self) -> PathBuf {
         if self.settings.vault_path.trim().is_empty() {
             self.home

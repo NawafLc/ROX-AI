@@ -1,14 +1,25 @@
 # ROX-AI 🤖🎮
 
-**A Windows desktop app that lets Claude study the top Roblox games for you**: it follows the charts every day,
-**actually plays** the trending games on an alt account (it sees the screen and uses the keyboard and mouse), and writes
-a detailed **Obsidian vault** with one **template / blueprint note per game**: core loop, onboarding, systems,
-progression, UI, monetization (with real prices), retention, content angles and a Roblox Studio build plan.
+**A Windows app that studies the top Roblox games for you.** It follows the charts every day and lets Claude
+**learn each new chart game from YouTube videos**: transcripts, descriptions and chapters of gameplay and guide
+videos, plus the game's public store data. It never touches your screen. Everything goes into an **Obsidian vault**
+with one detailed **template / blueprint note per game** (core loop, onboarding, systems, progression, UI,
+monetization with real prices, retention, content angles and a Roblox Studio build plan), and you can read it right
+inside the app.
 
-Claude is plugged in as an **MCP server**, so it runs on your existing Claude subscription. No API key needed.
-ROX-AI is written in **Rust**: one small, fast, self-contained `roxai.exe` (no Python or other runtime needed).
+Two modes, switchable any time on the Home tab:
 
----
+| Mode | What it does | Needs |
+|---|---|---|
+| **Passive** | Daily chart tracking, trends, store prices, badges: just the data | nothing |
+| **Active** | All of the above, plus Claude learns every new chart game from YouTube videos and writes the full breakdown | Claude Code (your Claude subscription) |
+
+The app has three tabs: **Home** (mode, status, big buttons), **Games** (dashboard of every game and whether it was
+learned from videos or is data only, with a **Learn** button per game) and **Vault** (browse and read every note,
+with clickable links; "Open in Obsidian" when you want).
+
+> AI playtesting on the real Roblox client still exists in the code but is **turned off** for now; video learning
+> replaces it.
 
 ## Get started
 
@@ -29,10 +40,11 @@ scheduled tasks; **More → Remove from this PC** undoes both, then just delete 
 
 | When | What | Needs Claude? |
 |---|---|---|
-| Every day (and at login if a day was missed) | Scans **Top Trending** (plus Top Playing Now and Up-and-Coming for trends), refreshes every game note, writes the day's chart note, genre notes and the dashboard | No |
-| Checked every hour; runs **once a week** when your PC has been **idle** for a few minutes | Claude playtests the queue (new games first, then stale or updated ones; 8 per run by default), fills each game's template, then writes a **Weekly Market Report** | Yes (Claude Code, your subscription) |
+| Every day (and at login if a day was missed) | Scans **Top Trending** (plus Top Playing Now and Up-and-Coming for trends), refreshes every game note, the day's chart note, genre notes and the dashboard | No |
+| Checked hourly in **Active** mode, runs once a day | Claude learns the new or changed chart games (5 per day by default) from 4 YouTube videos each, then once a week writes a **Weekly Market Report** | Yes (runs in the background, never uses your screen) |
 
-You'll get a Windows notification when a weekly run finishes, or if it ever needs you (for example, the Roblox login expired).
+The optional **Video reader** (the open-source `yt-dlp`, kept inside ROX-AI's folder) reads YouTube captions when the
+public page doesn't show them. Without it Claude still uses titles, descriptions, chapters and web search.
 
 ## The vault
 
@@ -60,7 +72,7 @@ with its price) · 🎨 Art/Feel · 🎬 Content Angles · 🛠️ Build Bluepri
 The `roxai` tools show up in Claude Desktop. Just ask:
 
 - *"What's trending on Roblox right now?"*
-- *"Playtest Throw Food For Animals and fill its template."* (or use the **playtest_game** prompt)
+- *"Learn Throw Food For Animals from YouTube and fill its template."* (or use the **learn_game** prompt)
 - *"Run the weekly cycle."* / *"Write a market report."*
 - *"Which games have the best clone potential?"*
 
@@ -103,13 +115,18 @@ swaps itself and restarts). Everything else lives under **More**.
 | `kill_hotkey` | ctrl+shift+q | emergency stop |
 | `claude_model` | (your default) | model the autopilot uses |
 | `vault_path` | (empty = `ROX-AI Vault` in the app folder) | where the vault lives |
-| `auto_run` | true | daily scan + weekly playtests in the background |
+| `auto_run` | true | daily scan + learning in the background |
+| `mode` | active | `passive` = data only · `active` = Claude learns games from videos |
+| `learn_per_run` | 5 | new games learned per day |
+| `videos_per_game` | 4 | YouTube videos read per game |
+| `reanalyze_after_days` | 30 | re-learn a game after this long |
+| `playtesting_enabled` | false | AI playtesting on the Roblox client (off) |
 
 ## Command line (optional)
 
 `roxai.exe` (next to `ROX-AI.exe`) does everything the app does, for scripting:
 ```
-roxai scan | autopilot --force | playtest <universeId> | queue | doctor | stop | update | remove | selftest
+roxai scan | autopilot --force | learn <universeId> | queue | doctor | stop | update | remove | selftest
 ```
 
 ## How it works

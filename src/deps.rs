@@ -20,6 +20,8 @@ pub struct Dep {
     pub name: &'static str,
     pub why: &'static str,
     pub ok: bool,
+    /// needed for the chosen mode (optional items never block "ready")
+    pub required: bool,
     pub action: Option<(Action, &'static str)>,
 }
 
@@ -73,62 +75,83 @@ pub fn claude_signed_in(ctx: &Ctx) -> bool {
 }
 
 pub fn status(ctx: &Ctx) -> Vec<Dep> {
-    let obs = crate::setup::obsidian_exe().is_some();
-    let rb = crate::win::roblox::is_installed();
+    let active = ctx.is_active();
+    let playtest = ctx.settings.playtesting_enabled;
     let blocked = ctx
         .store
         .get("blocked_reason")
         .map(|b| b["reason"].as_str().unwrap_or("").to_lowercase())
         .unwrap_or_default();
-    let rb_login =
-        rb && roblox_signed_in() && !(blocked.contains("login") && !blocked.contains("claude"));
-    let cd = claude_desktop_installed();
-    let cc = crate::autopilot::find_claude(ctx).is_some();
-    let cc_login = cc && claude_signed_in(ctx) && !blocked.contains("claude");
-    vec![
-        Dep {
-            id: "obsidian",
-            name: "Obsidian",
-            why: "Shows your vault of game notes",
-            ok: obs,
-            action: (!obs).then_some((Action::Install, "Install")),
-        },
-        Dep {
-            id: "roblox",
-            name: "Roblox",
-            why: "The AI plays the games in it",
-            ok: rb,
-            action: (!rb).then_some((Action::Install, "Install")),
-        },
-        Dep {
-            id: "roblox_login",
-            name: "Roblox alt account",
-            why: "Sign in once — use an ALT account, never your main",
-            ok: rb_login,
-            action: (rb && !rb_login).then_some((Action::SignIn, "Sign in")),
-        },
-        Dep {
+    let obs = crate::setup::obsidian_exe().is_some();
+    let mut v = vec![];
+    if active {
+        let cc = crate::autopilot::find_claude(ctx).is_some();
+        let cc_login = cc && claude_signed_in(ctx) && !blocked.contains("claude");
+        v.push(Dep {
             id: "claude_code",
             name: "Claude Code",
-            why: "Lets Claude play the games automatically",
+            why: "Lets Claude learn the games for you",
             ok: cc,
+            required: true,
             action: (!cc).then_some((Action::Install, "Install")),
-        },
-        Dep {
+        });
+        v.push(Dep {
             id: "claude_login",
             name: "Claude account",
             why: "Uses your Claude subscription",
             ok: cc_login,
+            required: true,
             action: (cc && !cc_login).then_some((Action::SignIn, "Sign in")),
-        },
-        Dep {
-            id: "claude_desktop",
-            name: "Claude Desktop",
-            why: "Optional — chat with ROX-AI yourself",
-            ok: cd,
-            action: (!cd).then_some((Action::Install, "Install")),
-        },
-    ]
+        });
+        let yt = crate::youtube::ytdlp_path(&ctx.tools_dir()).is_some();
+        v.push(Dep {
+            id: "video_reader",
+            name: "Video reader",
+            why: "Recommended — reads YouTube captions more reliably (kept inside ROX-AI's folder)",
+            ok: yt,
+            required: false,
+            action: (!yt).then_some((Action::Install, "Install")),
+        });
+    }
+    if playtest {
+        let rb = crate::win::roblox::is_installed();
+        let rb_login =
+            rb && roblox_signed_in() && !(blocked.contains("login") && !blocked.contains("claude"));
+        v.push(Dep {
+            id: "roblox",
+            name: "Roblox",
+            why: "The AI plays the games in it",
+            ok: rb,
+            required: true,
+            action: (!rb).then_some((Action::Install, "Install")),
+        });
+        v.push(Dep {
+            id: "roblox_login",
+            name: "Roblox alt account",
+            why: "Sign in once — use an ALT account, never your main",
+            ok: rb_login,
+            required: true,
+            action: (rb && !rb_login).then_some((Action::SignIn, "Sign in")),
+        });
+    }
+    v.push(Dep {
+        id: "obsidian",
+        name: "Obsidian",
+        why: "Optional — your vault also opens inside ROX-AI",
+        ok: obs,
+        required: false,
+        action: (!obs).then_some((Action::Install, "Install")),
+    });
+    let cd = claude_desktop_installed();
+    v.push(Dep {
+        id: "claude_desktop",
+        name: "Claude Desktop",
+        why: "Optional — chat with ROX-AI yourself",
+        ok: cd,
+        required: false,
+        action: (!cd).then_some((Action::Install, "Install")),
+    });
+    v
 }
 
 /// Progress callback: (what's happening, optional 0..1 progress).
@@ -253,7 +276,7 @@ fn wait_until(check: impl Fn() -> bool, secs: u64) -> bool {
 
 /// Perform an install / sign-in. Blocking (run it on a background thread). Returns a short message.
 pub fn act(ctx: &Ctx, id: &str, action: Action, report: Report) -> Result<String> {
-    if !cfg!(windows) && action == Action::Install {
+    if !cfg!(windows) && action == Action::Install && id != "video_reader" {
         bail!("installing apps is only supported on Windows");
     }
     let wg = action == Action::Install && have_winget();
@@ -311,6 +334,10 @@ pub fn act(ctx: &Ctx, id: &str, action: Action, report: Report) -> Result<String
             }
             let _ = crate::setup::register_claude_desktop(ctx);
             Ok("Claude Desktop is installed — open it once and sign in.".into())
+        }
+        ("video_reader", Action::Install) => {
+            crate::youtube::install_ytdlp(&ctx.tools_dir(), report)?;
+            Ok("Video reader installed (inside ROX-AI's folder).".into())
         }
         ("claude_code", Action::Install) => {
             report("Installing Claude Code…", None);

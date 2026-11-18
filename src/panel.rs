@@ -1,11 +1,15 @@
 //! The ROX-AI app window.
 //!
-//! First start → a step-by-step **setup wizard** (welcome → location → apps → accounts → preferences → done).
-//! Afterwards → a simple home screen: status card, two big buttons, one switch.
-//! All slow work (installs, sign-ins, scans) runs on background threads with visible progress.
+//! First start → a step-by-step setup wizard. Afterwards three tabs:
+//!   Home  — Passive / Active mode, what ROX-AI is doing, a couple of big buttons
+//!   Games — dashboard of every tracked game and how it was analyzed (videos / data)
+//!   Vault — read the Obsidian vault right inside the app
+//! Slow work (installs, sign-ins, scans, learning) runs in the background with visible progress.
 
 use crate::config::Ctx;
 use crate::deps::{Action, Dep};
+use crate::gamesview::GameRow;
+use crate::vaultview::Block;
 use eframe::egui::{self, Color32, RichText};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -14,20 +18,28 @@ use std::time::{Duration, Instant};
 const ACC: Color32 = Color32::from_rgb(0, 214, 168);
 const RED: Color32 = Color32::from_rgb(240, 82, 96);
 const AMBER: Color32 = Color32::from_rgb(255, 196, 82);
+const BLUE: Color32 = Color32::from_rgb(110, 160, 255);
 const CARD: Color32 = Color32::from_rgb(30, 34, 48);
 const CARD2: Color32 = Color32::from_rgb(40, 45, 62);
 const BG: Color32 = Color32::from_rgb(19, 21, 31);
 const MUTED: Color32 = Color32::from_rgb(140, 148, 168);
-const STEPS: [&str; 6] = [
+const STEPS: [&str; 7] = [
     "Welcome",
     "Location",
+    "Mode",
     "Apps",
     "Accounts",
     "Preferences",
     "Done",
 ];
+const S_LOCATION: usize = 1;
+const S_MODE: usize = 2;
+const S_APPS: usize = 3;
+const S_ACCOUNTS: usize = 4;
+const S_PREFS: usize = 5;
+const S_DONE: usize = 6;
 
-/// Run the app exe in the background (no window) — e.g. a scan or a playtest run.
+/// Run the app exe in the background (no window) — e.g. a scan or a learning run.
 pub fn bg_cli(args: &[&str]) {
     let mut c = crate::util::hidden_command(crate::util::bg_exe());
     c.args(args)
@@ -42,6 +54,24 @@ pub fn bg_cli(args: &[&str]) {
     let _ = c.spawn();
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Tab {
+    Home,
+    Games,
+    Vault,
+}
+
+/// State of the always-visible update button (top-right corner).
+#[derive(Clone, Default, PartialEq)]
+enum Upd {
+    #[default]
+    Checking,
+    UpToDate,
+    Available(String),
+    Installing,
+    Failed(String),
+}
+
 #[derive(Default)]
 struct Shared {
     deps: Option<Vec<Dep>>,
@@ -49,21 +79,37 @@ struct Shared {
     job: Option<(String, String, Option<f32>)>,
     queue: Vec<(String, Action)>,
     toast: Option<(String, bool)>,
-    update: Option<String>,
+    upd: Upd,
     moving: Option<String>,
+    games: Option<Vec<GameRow>>,
+}
+
+#[derive(Default)]
+struct VaultState {
+    current: Option<String>,
+    history: Vec<String>,
+    parsed: Option<(String, Vec<(String, String)>, Vec<Block>)>,
+    tree: Vec<(&'static str, Vec<String>)>,
+    tree_loaded: Option<Instant>,
+    search: String,
 }
 
 struct App {
     ctx: Ctx,
     sh: Arc<Mutex<Shared>>,
     wizard: Option<usize>,
+    tab: Tab,
     move_to: Option<PathBuf>,
     desktop_shortcut: bool,
     start_shortcut: bool,
     activity: (String, String, Color32),
-    playing: bool,
+    busy: bool,
     last_tick: Instant,
     last_deps: Instant,
+    games_loaded: Option<Instant>,
+    games_filter: usize,
+    games_search: String,
+    vault: VaultState,
 }
 
 fn btn(text: &str, fill: Color32, w: f32, h: f32) -> egui::Button<'static> {
@@ -96,6 +142,21 @@ fn card<R>(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui) -> 
         .inner
 }
 
+fn dot(ui: &mut egui::Ui, color: Color32, h: f32) {
+    let (r, _) = ui.allocate_exact_size(egui::vec2(16.0, h), egui::Sense::hover());
+    ui.painter().circle_filled(r.center(), 6.0, color);
+}
+
+fn pill(ui: &mut egui::Ui, text: &str, fill: Color32, fg: Color32) {
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(20.0)
+        .inner_margin(egui::Margin::symmetric(8, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).small().color(fg));
+        });
+}
+
 impl App {
     fn new(ctx: Ctx) -> App {
         let first = ctx.store.get("setup_complete").is_none();
@@ -109,14 +170,26 @@ impl App {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .or(first.then_some(0)),
+            tab: match std::env::var("ROXAI_UI_TAB").as_deref() {
+                Ok("games") => Tab::Games,
+                Ok("vault") => Tab::Vault,
+                _ => Tab::Home,
+            },
             move_to,
             desktop_shortcut: true,
             start_shortcut: true,
             activity: ("ROX-AI".into(), "Starting…".into(), ACC),
-            playing: false,
+            busy: false,
             last_tick: Instant::now() - Duration::from_secs(10),
             last_deps: Instant::now(),
+            games_loaded: None,
+            games_filter: 0,
+            games_search: String::new(),
+            vault: VaultState::default(),
         };
+        if let Ok(n) = std::env::var("ROXAI_UI_NOTE") {
+            a.vault.current = Some(n);
+        }
         a.startup();
         a
     }
@@ -138,11 +211,7 @@ impl App {
             if !first && !scanned && !crate::util::is_locked(&ctx.state_dir(), "scan") {
                 bg_cli(&["scan", "--if-needed"]);
             }
-            if let Ok(st) = crate::update::check() {
-                if st.update_available {
-                    sh.lock().unwrap().update = st.latest.map(|l| l.version);
-                }
-            }
+            check_updates(&sh);
         });
     }
 
@@ -157,6 +226,22 @@ impl App {
 
     fn toast(&self, msg: impl Into<String>, ok: bool) {
         self.sh.lock().unwrap().toast = Some((msg.into(), ok));
+    }
+
+    fn set_mode(&mut self, mode: &str) {
+        if self.ctx.settings.mode == mode {
+            return;
+        }
+        self.ctx.settings.mode = mode.into();
+        let _ = self.ctx.settings.save(&self.ctx.home);
+        let ctx = self.ctx.clone();
+        let sh = self.sh.clone();
+        std::thread::spawn(move || {
+            crate::setup::apply_auto_run(&ctx);
+            let d = crate::deps::status(&ctx);
+            sh.lock().unwrap().deps = Some(d);
+        });
+        self.tick();
     }
 
     /// Queue installs / sign-ins; one worker runs them in order with live progress.
@@ -200,10 +285,23 @@ impl App {
         });
     }
 
+    fn missing_required(&self) -> Option<usize> {
+        self.sh
+            .lock()
+            .unwrap()
+            .deps
+            .as_ref()
+            .map(|d| d.iter().filter(|x| x.required && !x.ok).count())
+    }
+
     // ================================================================ wizard
     fn wizard_ui(&mut self, ui: &mut egui::Ui, step: usize) {
+        let active = self.ctx.is_active();
         ui.horizontal_wrapped(|ui| {
             for (i, name) in STEPS.iter().enumerate() {
+                if i == S_ACCOUNTS && !active {
+                    continue;
+                }
                 let (fill, fg) = if i == step {
                     (ACC, Color32::BLACK)
                 } else if i < step {
@@ -211,17 +309,7 @@ impl App {
                 } else {
                     (CARD, MUTED)
                 };
-                egui::Frame::new()
-                    .fill(fill)
-                    .corner_radius(20.0)
-                    .inner_margin(egui::Margin::symmetric(10, 4))
-                    .show(ui, |ui| {
-                        ui.label(
-                            RichText::new(format!("{}  {}", i + 1, name))
-                                .small()
-                                .color(fg),
-                        );
-                    });
+                pill(ui, name, fill, fg);
             }
         });
         ui.add_space(18.0);
@@ -237,8 +325,8 @@ impl App {
                 ui.add_space(8.0);
                 for (t, d) in [
                     ("Follows the Roblox charts", "Every day it reads the top trending games and tracks how they grow."),
-                    ("Lets Claude play them", "Claude opens Roblox on an alt account and actually plays each game."),
-                    ("Writes everything down", "One detailed Obsidian note per game: loop, systems, monetization, how to build it."),
+                    ("Learns each game from YouTube", "Claude reads gameplay and guide videos about every new chart game — it never touches your screen."),
+                    ("Writes everything down", "One detailed note per game: loop, systems, monetization, how to build it. Read it right here in the app."),
                 ] {
                     card(ui, CARD, |ui| {
                         ui.label(RichText::new(t).strong().size(15.0));
@@ -247,11 +335,17 @@ impl App {
                     ui.add_space(6.0);
                 }
                 ui.add_space(6.0);
-                ui.label(RichText::new("Setup takes about 5 minutes. ROX-AI is portable — it keeps everything in its own folder.").color(MUTED));
+                ui.label(RichText::new("Setup takes a few minutes. ROX-AI is portable — it keeps everything in its own folder.").color(MUTED));
                 next_label = "Get started";
             }
-            1 => self.step_location(ui),
-            2 => {
+            S_LOCATION => self.step_location(ui),
+            S_MODE => {
+                ui.label(RichText::new("How should ROX-AI work?").size(22.0).strong());
+                ui.label(RichText::new("You can switch any time on the Home tab.").color(MUTED));
+                ui.add_space(10.0);
+                self.mode_cards(ui, true);
+            }
+            S_APPS => {
                 ui.label(RichText::new("Apps ROX-AI works with").size(22.0).strong());
                 ui.label(
                     RichText::new(
@@ -260,13 +354,25 @@ impl App {
                     .color(MUTED),
                 );
                 ui.add_space(10.0);
-                let apps = ["obsidian", "roblox", "claude_code", "claude_desktop"];
-                self.dep_rows(ui, deps.as_deref(), &apps, job.as_ref());
+                let ids: Vec<&str> = deps
+                    .as_ref()
+                    .map(|d| {
+                        d.iter()
+                            .filter(|x| !x.id.ends_with("_login"))
+                            .map(|x| x.id)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.dep_rows(ui, deps.as_deref(), &ids, job.as_ref());
                 let missing: Vec<(String, Action)> = deps
                     .as_ref()
                     .map(|d| {
                         d.iter()
-                            .filter(|x| apps.contains(&x.id) && !x.ok && x.id != "claude_desktop")
+                            .filter(|x| {
+                                ids.contains(&x.id)
+                                    && !x.ok
+                                    && (x.required || x.id == "video_reader")
+                            })
                             .filter_map(|x| x.action.map(|(a, _)| (x.id.to_string(), a)))
                             .collect()
                     })
@@ -276,9 +382,9 @@ impl App {
                     && job.is_none()
                     && ui
                         .add(btn(
-                            &format!("Install all missing ({})", missing.len()),
+                            &format!("Install all recommended ({})", missing.len()),
                             ACC,
-                            230.0,
+                            260.0,
                             38.0,
                         ))
                         .clicked()
@@ -286,63 +392,74 @@ impl App {
                     self.enqueue(missing.clone());
                 }
                 next_enabled = job.is_none();
-                if !missing.is_empty() {
+                if deps
+                    .as_ref()
+                    .is_some_and(|d| d.iter().any(|x| ids.contains(&x.id) && x.required && !x.ok))
+                {
                     next_label = "Skip for now";
                 }
             }
-            3 => {
+            S_ACCOUNTS => {
                 ui.label(RichText::new("Sign in").size(22.0).strong());
-                ui.label(RichText::new("Two one-time sign-ins. Each opens your browser; this page turns green by itself.").color(MUTED));
-                ui.add_space(10.0);
-                self.dep_rows(
-                    ui,
-                    deps.as_deref(),
-                    &["roblox_login", "claude_login"],
-                    job.as_ref(),
+                ui.label(
+                    RichText::new(
+                        "One-time sign-in. It opens your browser; this page turns green by itself.",
+                    )
+                    .color(MUTED),
                 );
-                ui.add_space(8.0);
-                card(ui, CARD, |ui| {
-                    ui.label(
-                        RichText::new("Use an ALT Roblox account, never your main.")
-                            .color(AMBER)
-                            .strong(),
-                    );
-                    ui.label(RichText::new("Automated play is against Roblox's rules; an alt keeps your real account safe. After signing in on the website, press Play on any game once so the Roblox app remembers you.").color(MUTED).small());
-                });
+                ui.add_space(10.0);
+                let ids: Vec<&str> = deps
+                    .as_ref()
+                    .map(|d| {
+                        d.iter()
+                            .filter(|x| x.id.ends_with("_login"))
+                            .map(|x| x.id)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.dep_rows(ui, deps.as_deref(), &ids, job.as_ref());
                 next_enabled = job.is_none();
-                if deps.as_ref().is_some_and(|d| {
-                    d.iter()
-                        .any(|x| (x.id == "roblox_login" || x.id == "claude_login") && !x.ok)
-                }) {
+                if deps
+                    .as_ref()
+                    .is_some_and(|d| d.iter().any(|x| x.id.ends_with("_login") && !x.ok))
+                {
                     next_label = "Skip for now";
                 }
             }
-            4 => {
+            S_PREFS => {
                 ui.label(RichText::new("Preferences").size(22.0).strong());
                 ui.add_space(10.0);
+                let active = self.ctx.is_active();
                 let s = &mut self.ctx.settings;
                 card(ui, CARD, |ui| {
                     ui.checkbox(
                         &mut s.auto_run,
                         RichText::new("Run automatically").strong().size(15.0),
                     );
-                    ui.label(RichText::new("Updates the charts every day, and once a week lets Claude play new games while your PC is idle.").color(MUTED).small());
+                    let what = if active {
+                        "Updates the charts every day and lets Claude learn the new games in the background."
+                    } else {
+                        "Updates the charts every day in the background."
+                    };
+                    ui.label(RichText::new(what).color(MUTED).small());
                 });
-                ui.add_space(6.0);
-                card(ui, CARD, |ui| {
-                    ui.label(RichText::new("Games Claude plays each week").strong());
-                    ui.add(egui::Slider::new(&mut s.playtests_per_run, 1..=25));
-                    ui.label(
-                        RichText::new("More games use more of your Claude plan.")
-                            .color(MUTED)
-                            .small(),
-                    );
-                });
-                ui.add_space(6.0);
-                card(ui, CARD, |ui| {
-                    ui.label(RichText::new("Minutes per game").strong());
-                    ui.add(egui::Slider::new(&mut s.playtest_minutes, 5..=30));
-                });
+                if active {
+                    ui.add_space(6.0);
+                    card(ui, CARD, |ui| {
+                        ui.label(RichText::new("New games Claude learns per day").strong());
+                        ui.add(egui::Slider::new(&mut s.learn_per_run, 1..=25));
+                        ui.label(
+                            RichText::new("More games use more of your Claude plan.")
+                                .color(MUTED)
+                                .small(),
+                        );
+                    });
+                    ui.add_space(6.0);
+                    card(ui, CARD, |ui| {
+                        ui.label(RichText::new("Videos per game").strong());
+                        ui.add(egui::Slider::new(&mut s.videos_per_game, 2..=8));
+                    });
+                }
                 next_label = "Finish setup";
             }
             _ => {
@@ -353,17 +470,7 @@ impl App {
                         .color(ACC),
                 );
                 ui.add_space(8.0);
-                ui.label(
-                    RichText::new(
-                        "ROX-AI is reading today's charts and building your vault right now.",
-                    )
-                    .color(MUTED),
-                );
-                ui.add_space(14.0);
-                if ui.add(btn("Open my vault", ACC, 220.0, 46.0)).clicked() {
-                    let ctx = self.ctx.clone();
-                    std::thread::spawn(move || crate::setup::open_vault(&ctx));
-                }
+                ui.label(RichText::new("ROX-AI is reading today's charts now. Your games appear on the Games tab within a minute.").color(MUTED));
                 next_label = "Go to ROX-AI";
             }
         }
@@ -385,8 +492,14 @@ impl App {
                     {
                         self.wizard_next(step);
                     }
-                    if step > 0 && step < 5 && ui.add(btn("Back", CARD, 90.0, 42.0)).clicked() {
-                        self.wizard = Some(step - 1);
+                    if step > 0 && step < S_DONE && ui.add(btn("Back", CARD, 90.0, 42.0)).clicked()
+                    {
+                        let back = if step == S_PREFS && !self.ctx.is_active() {
+                            S_APPS
+                        } else {
+                            step - 1
+                        };
+                        self.wizard = Some(back);
                         self.sh.lock().unwrap().toast = None;
                     }
                     if let Some(m) = moving {
@@ -401,10 +514,10 @@ impl App {
     fn wizard_next(&mut self, step: usize) {
         self.sh.lock().unwrap().toast = None;
         match step {
-            1 => {
+            S_LOCATION => {
                 let shortcuts = (self.desktop_shortcut, self.start_shortcut);
                 if let Some(dest) = self.move_to.clone() {
-                    // copy to the new folder, restart from there, the new copy cleans up the old one
+                    // copy to the new folder, restart from there; the new copy cleans up the old one
                     let sh = self.sh.clone();
                     sh.lock().unwrap().moving = Some("Moving ROX-AI…".into());
                     std::thread::spawn(move || match crate::relocate::move_app(&dest) {
@@ -443,9 +556,16 @@ impl App {
                         let _ = crate::relocate::create_shortcuts(&exe, shortcuts.0, shortcuts.1);
                     });
                 }
-                self.wizard = Some(2);
+                self.wizard = Some(S_MODE);
             }
-            4 => {
+            S_APPS => {
+                self.wizard = Some(if self.ctx.is_active() {
+                    S_ACCOUNTS
+                } else {
+                    S_PREFS
+                })
+            }
+            S_PREFS => {
                 let _ = self.ctx.settings.save(&self.ctx.home);
                 let _ = self
                     .ctx
@@ -458,13 +578,87 @@ impl App {
                 if !crate::util::is_locked(&self.ctx.state_dir(), "scan") {
                     bg_cli(&["scan", "--if-needed"]);
                 }
-                self.wizard = Some(5);
+                self.wizard = Some(S_DONE);
             }
-            5 => {
+            S_DONE => {
                 self.wizard = None;
+                self.tab = Tab::Home;
                 self.tick();
             }
             s => self.wizard = Some(s + 1),
+        }
+    }
+
+    /// The Passive / Active choice (used in the wizard and on Home).
+    fn mode_cards(&mut self, ui: &mut egui::Ui, big: bool) {
+        let active = self.ctx.is_active();
+        let w = (ui.available_width() - 10.0) / 2.0;
+        let h = if big { 150.0 } else { 104.0 };
+        let mut choose = None;
+        ui.horizontal(|ui| {
+            for (mode, title, lines) in [
+                (
+                    "passive",
+                    "Passive",
+                    [
+                        "Just the data",
+                        "Daily chart tracking, trends, store prices.",
+                        "No Claude needed.",
+                    ],
+                ),
+                (
+                    "active",
+                    "Active",
+                    [
+                        "Learn every game",
+                        "Claude learns each new chart game from YouTube videos.",
+                        "Uses your Claude plan — never your screen.",
+                    ],
+                ),
+            ] {
+                let selected = (mode == "active") == active;
+                let fill = if selected { CARD2 } else { CARD };
+                let stroke = if selected {
+                    egui::Stroke::new(2.0, ACC)
+                } else {
+                    egui::Stroke::new(1.0, CARD2)
+                };
+                let resp = egui::Frame::new()
+                    .fill(fill)
+                    .stroke(stroke)
+                    .corner_radius(12.0)
+                    .inner_margin(14.0)
+                    .show(ui, |ui| {
+                        ui.set_width(w - 32.0);
+                        ui.set_min_height(h - 28.0);
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                dot(ui, if selected { ACC } else { MUTED }, 22.0);
+                                ui.label(
+                                    RichText::new(title).size(19.0).strong().color(if selected {
+                                        ACC
+                                    } else {
+                                        Color32::WHITE
+                                    }),
+                                );
+                            });
+                            ui.label(RichText::new(lines[0]).strong());
+                            if big {
+                                ui.label(RichText::new(lines[1]).color(MUTED).small());
+                            }
+                            ui.label(RichText::new(lines[2]).color(MUTED).small());
+                        });
+                    })
+                    .response
+                    .interact(egui::Sense::click());
+                if resp.clicked() {
+                    choose = Some(mode);
+                }
+                resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            }
+        });
+        if let Some(m) = choose {
+            self.set_mode(m);
         }
     }
 
@@ -565,11 +759,8 @@ impl App {
             let running = job.filter(|j| j.0 == d.id);
             card(ui, CARD, |ui| {
                 ui.horizontal(|ui| {
-                    let (r, _) =
-                        ui.allocate_exact_size(egui::vec2(16.0, 34.0), egui::Sense::hover());
-                    ui.painter().circle_filled(
-                        r.center(),
-                        6.0,
+                    dot(
+                        ui,
                         if d.ok {
                             ACC
                         } else if running.is_some() {
@@ -577,9 +768,15 @@ impl App {
                         } else {
                             MUTED
                         },
+                        34.0,
                     );
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(d.name).strong().size(15.0));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(d.name).strong().size(15.0));
+                            if !d.required && !d.ok {
+                                pill(ui, "optional", CARD2, MUTED);
+                            }
+                        });
                         let sub = if d.ok {
                             "Ready".to_string()
                         } else {
@@ -606,7 +803,7 @@ impl App {
                                 self.enqueue(vec![(d.id.to_string(), act)]);
                             }
                         } else {
-                            ui.label(RichText::new("install Roblox first").color(MUTED).small());
+                            ui.label(RichText::new("install the app first").color(MUTED).small());
                         }
                     });
                 });
@@ -623,42 +820,45 @@ impl App {
         }
     }
 
-    // ============================================================ home screen
+    // ============================================================ Home tab
     fn tick(&mut self) {
         self.last_tick = Instant::now();
         let st = self.ctx.state_dir();
-        self.playing = false;
+        self.busy = false;
         if let Some(d) = std::fs::read_to_string(self.ctx.session_file())
             .ok()
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         {
             let el = d["elapsed"].as_u64().unwrap_or(0);
-            let total = d["budget_s"].as_f64().unwrap_or(0.0) as u64;
-            self.playing = true;
+            self.busy = true;
             self.activity = (
                 format!(
                     "Playing {}",
                     crate::vault::clean_display_name(d["name"].as_str().unwrap_or("a game"))
                 ),
                 format!(
-                    "{}:{:02} of {}:00 — hands off! Moving your mouse stops the AI.",
+                    "{}:{:02} — moving your mouse stops the AI.",
                     el / 60,
-                    el % 60,
-                    total / 60
+                    el % 60
                 ),
                 ACC,
             );
             return;
         }
         if crate::util::is_locked(&st, "autopilot") {
-            self.activity = (
-                "Playtests running".into(),
-                "Claude is about to play the next game…".into(),
-                ACC,
-            );
+            self.busy = true;
+            let now = self.ctx.store.get("learning_now");
+            let game = now
+                .as_ref()
+                .and_then(|n| n["game"].as_str().map(String::from));
+            self.activity = match game {
+                Some(g) => (format!("Learning {}", crate::vault::clean_display_name(&g)), "Claude is reading YouTube videos about it — this takes a few minutes per game.".into(), BLUE),
+                None => ("Learning new games…".into(), "Picking the games to learn".into(), BLUE),
+            };
             return;
         }
         if crate::util::is_locked(&st, "scan") {
+            self.busy = true;
             self.activity = (
                 "Updating the charts…".into(),
                 "Reading the top Roblox games (about a minute)".into(),
@@ -666,130 +866,444 @@ impl App {
             );
             return;
         }
-        let games = self.ctx.store.games().len();
-        let played = self.ctx.store.count_playtests("completed");
-        let missing = self.sh.lock().unwrap().deps.as_ref().map(|d| {
-            d.iter()
-                .filter(|x| !x.ok && x.id != "claude_desktop")
-                .count()
-        });
+        let games = self.ctx.store.games();
+        let learned = games
+            .values()
+            .filter(|g| g.analysis_source.is_some())
+            .count();
         if let Some(b) = self.ctx.store.get("blocked_reason") {
             self.activity = (
                 "Needs you".into(),
                 b["reason"].as_str().unwrap_or("").to_string(),
                 AMBER,
             );
-        } else if let Some(m) = missing.filter(|m| *m > 0) {
+        } else if let Some(m) = self.missing_required().filter(|m| *m > 0) {
             self.activity = (
                 format!("{m} setup step{} left", if m == 1 { "" } else { "s" }),
                 "Click “Finish setup” to complete it.".into(),
                 AMBER,
             );
         } else {
-            let when = if self.ctx.settings.auto_run {
-                "Charts update daily · Claude plays new games every week"
+            let auto = if !self.ctx.settings.auto_run {
+                "Automatic mode is off — use the buttons below."
+            } else if self.ctx.is_active() {
+                "Charts update daily · new games are learned automatically."
             } else {
-                "Automatic mode is off — use the buttons below"
+                "Charts update daily."
             };
             self.activity = (
                 "All set".into(),
-                format!("{games} games tracked · {played} played by Claude\n{when}"),
+                format!("{} games tracked · {learned} learned\n{auto}", games.len()),
                 ACC,
             );
         }
     }
 
     fn home_ui(&mut self, ui: &mut egui::Ui) {
-        if self.last_tick.elapsed() > Duration::from_millis(1500) {
-            self.tick();
-        }
-        let full = ui.available_width();
+        self.mode_cards(ui, false);
+        ui.add_space(12.0);
         let (title, sub, col) = self.activity.clone();
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(egui::vec2(14.0, 24.0), egui::Sense::hover());
-                ui.painter().circle_filled(r.center(), 6.0, col);
-                ui.label(RichText::new(title).size(21.0).strong().color(col));
+                dot(ui, col, 24.0);
+                ui.label(RichText::new(title).size(20.0).strong().color(col));
             });
             ui.label(RichText::new(sub).color(MUTED));
-            if self.playing {
-                ui.add_space(8.0);
-                if ui.add(btn("Stop", RED, 120.0, 34.0)).clicked() {
+            if self.busy && crate::util::is_locked(&self.ctx.state_dir(), "autopilot") {
+                ui.add_space(6.0);
+                if ui.add(btn("Stop", RED, 100.0, 30.0)).clicked() {
                     crate::session::request_stop(&self.ctx, "Stop button");
                     bg_cli(&["stop"]);
-                    self.toast("Stopped. Roblox closed.", true);
+                    self.toast("Stopping after the current step…", true);
                 }
             }
         });
         ui.add_space(10.0);
-        let deps = self.sh.lock().unwrap().deps.clone();
-        let incomplete = deps
-            .as_ref()
-            .is_some_and(|d| d.iter().any(|x| !x.ok && x.id != "claude_desktop"));
-        if incomplete && ui.add(btn("Finish setup", AMBER, 160.0, 34.0)).clicked() {
-            let first_missing = deps
+        let missing = self.missing_required().unwrap_or(0);
+        if missing > 0 && ui.add(btn("Finish setup", AMBER, 160.0, 34.0)).clicked() {
+            let first = self
+                .sh
+                .lock()
+                .unwrap()
+                .deps
                 .as_ref()
-                .and_then(|d| d.iter().find(|x| !x.ok && x.id != "claude_desktop"))
-                .map(|x| x.id)
-                .unwrap_or("obsidian");
-            self.wizard = Some(if first_missing.ends_with("_login") {
-                3
+                .and_then(|d| {
+                    d.iter()
+                        .find(|x| x.required && !x.ok)
+                        .map(|x| x.id.to_string())
+                })
+                .unwrap_or_default();
+            self.wizard = Some(if first.ends_with("_login") {
+                S_ACCOUNTS
             } else {
-                2
+                S_APPS
             });
         }
-        ui.add_space(14.0);
-        let ready = deps.as_ref().is_some_and(|l| {
-            l.iter()
-                .filter(|d| d.id != "claude_desktop" && d.id != "obsidian")
-                .all(|d| d.ok)
-        });
-        let bw = (full - 12.0) / 2.0;
+        ui.add_space(10.0);
+        let w = (ui.available_width() - 12.0) / 2.0;
         ui.horizontal(|ui| {
-            if ui.add(btn("Open my vault", ACC, bw, 56.0)).clicked() {
-                let ctx = self.ctx.clone();
-                std::thread::spawn(move || crate::setup::open_vault(&ctx));
+            if ui.add(btn("Browse my games", ACC, w, 54.0)).clicked() {
+                self.tab = Tab::Games;
             }
-            if ui.add_enabled(ready && !self.playing, btn("Play the top games now", CARD2, bw, 56.0)).on_disabled_hover_text("Finish the setup first (Roblox and Claude sign-ins).").clicked() {
-                bg_cli(&["autopilot", "--force", "--idle-wait", "1"]);
-                self.toast("Starting — Claude opens Roblox in a moment. Don't touch the mouse while it plays.", true);
+            if self.ctx.is_active() {
+                let ready = missing == 0;
+                if ui.add_enabled(ready && !self.busy, btn("Learn new games now", CARD2, w, 54.0)).on_disabled_hover_text(if ready { "Already working…" } else { "Finish the setup first (Claude sign-in)." }).clicked() {
+                    bg_cli(&["autopilot", "--force"]);
+                    self.toast("Learning started — Claude is reading YouTube videos. Keep using your PC normally.", true);
+                    self.last_tick = Instant::now() - Duration::from_secs(10);
+                }
+            } else if ui.add_enabled(!self.busy, btn("Update charts now", CARD2, w, 54.0)).clicked() {
+                bg_cli(&["scan"]);
+                self.toast("Updating the charts…", true);
             }
         });
         ui.add_space(12.0);
         let mut auto = self.ctx.settings.auto_run;
-        if ui.checkbox(&mut auto, "Run automatically (update charts daily, play new games weekly when the PC is idle)").changed() {
+        if ui
+            .checkbox(&mut auto, "Run automatically in the background")
+            .changed()
+        {
             self.ctx.settings.auto_run = auto;
             let _ = self.ctx.settings.save(&self.ctx.home);
             let ctx = self.ctx.clone();
             std::thread::spawn(move || crate::setup::apply_auto_run(&ctx));
             self.tick();
         }
-        if let Some((m, ok)) = self.sh.lock().unwrap().toast.clone() {
-            ui.add_space(8.0);
-            ui.label(RichText::new(m).color(if ok { ACC } else { RED }));
+    }
+
+    // =========================================================== Games tab
+    fn games_ui(&mut self, ui: &mut egui::Ui) {
+        if self
+            .games_loaded
+            .is_none_or(|t| t.elapsed() > Duration::from_secs(15))
+        {
+            self.games_loaded = Some(Instant::now());
+            let (ctx, sh) = (self.ctx.clone(), self.sh.clone());
+            std::thread::spawn(move || {
+                let r = crate::gamesview::rows(&ctx);
+                sh.lock().unwrap().games = Some(r);
+            });
         }
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        let Some(all) = self.sh.lock().unwrap().games.clone() else {
             ui.horizontal(|ui| {
-                let upd = self.sh.lock().unwrap().update.clone();
-                if let Some(v) = upd {
-                    if ui
-                        .add(btn(&format!("Update to v{v}"), AMBER, 0.0, 30.0))
-                        .clicked()
-                    {
-                        self.toast("Downloading the update…", true);
-                        let (ctx, sh) = (self.ctx.clone(), self.sh.clone());
-                        std::thread::spawn(move || match crate::update::run(&ctx, false) {
-                            Ok(_) => std::process::exit(0),
-                            Err(e) => {
-                                sh.lock().unwrap().toast =
-                                    Some((format!("Update failed: {e}"), false))
-                            }
-                        });
-                    }
+                ui.add(egui::Spinner::new());
+                ui.label("Loading games…");
+            });
+            return;
+        };
+        let learned = all.iter().filter(|g| g.learned()).count();
+        ui.horizontal(|ui| {
+            for (i, label) in [
+                format!("All {}", all.len()),
+                format!("Learned {learned}"),
+                format!("Data only {}", all.len() - learned),
+                "On the chart".to_string(),
+            ]
+            .iter()
+            .enumerate()
+            {
+                if ui
+                    .selectable_label(self.games_filter == i, RichText::new(label).strong())
+                    .clicked()
+                {
+                    self.games_filter = i;
                 }
-                self.more_menu(ui);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.games_search)
+                        .hint_text("Search games…")
+                        .desired_width(180.0),
+                );
             });
         });
+        ui.add_space(8.0);
+        let q = self.games_search.to_lowercase();
+        let rows: Vec<&GameRow> = all
+            .iter()
+            .filter(|g| match self.games_filter {
+                1 => g.learned(),
+                2 => !g.learned(),
+                3 => g.rank.is_some(),
+                _ => true,
+            })
+            .filter(|g| {
+                q.is_empty()
+                    || g.title.to_lowercase().contains(&q)
+                    || g.genre.to_lowercase().contains(&q)
+            })
+            .collect();
+        if rows.is_empty() {
+            ui.label(
+                RichText::new("No games yet — the first chart scan fills this in about a minute.")
+                    .color(MUTED),
+            );
+            return;
+        }
+        let mut open: Option<String> = None;
+        let mut learn: Option<u64> = None;
+        let active = self.ctx.is_active();
+        egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                egui::Grid::new("games")
+                    .striped(true)
+                    .spacing([14.0, 8.0])
+                    .show(ui, |ui| {
+                        for h in [
+                            "#",
+                            "Game",
+                            "Genre",
+                            "Playing",
+                            "Like %",
+                            "Momentum",
+                            "Learned from",
+                            "Fun",
+                        ] {
+                            ui.label(RichText::new(h).small().strong().color(MUTED));
+                        }
+                        ui.end_row();
+                        for g in rows {
+                            ui.label(g.rank.map(|r| format!("#{r}")).unwrap_or("–".into()));
+                            ui.vertical(|ui| {
+                                ui.set_min_width(260.0);
+                                if ui
+                                    .link(RichText::new(&g.title).strong().color(Color32::WHITE))
+                                    .on_hover_text("Open this game's note")
+                                    .clicked()
+                                {
+                                    open = g.note.clone();
+                                }
+                                if !g.one_liner.is_empty() {
+                                    let mut ol = crate::vaultview::clean(&g.one_liner);
+                                    if ol.chars().count() > 48 {
+                                        ol = ol.chars().take(46).collect::<String>() + "…";
+                                    }
+                                    ui.label(RichText::new(ol).small().color(MUTED));
+                                }
+                            });
+                            ui.label(RichText::new(&g.genre).color(MUTED));
+                            ui.label(crate::analysis::n(g.playing));
+                            ui.label(format!("{:.0}%", g.like_ratio));
+                            ui.label(g.momentum.to_string());
+                            ui.horizontal(|ui| {
+                                let (fill, fg) = match g.source.as_str() {
+                                    "videos" => (Color32::from_rgb(20, 70, 60), ACC),
+                                    "playtest" => (Color32::from_rgb(30, 50, 90), BLUE),
+                                    "data" => (CARD2, Color32::WHITE),
+                                    _ => (CARD, MUTED),
+                                };
+                                pill(ui, g.source_label(), fill, fg);
+                                if !g.learned()
+                                    && active
+                                    && ui
+                                        .small_button("Learn")
+                                        .on_hover_text(
+                                            "Let Claude learn this game from YouTube now",
+                                        )
+                                        .clicked()
+                                {
+                                    learn = Some(g.uid);
+                                }
+                            });
+                            ui.label(g.fun.map(|f| format!("{f}/10")).unwrap_or("–".into()));
+                            ui.end_row();
+                        }
+                    });
+            });
+        if let Some(n) = open {
+            self.open_note(&n);
+        }
+        if let Some(uid) = learn {
+            if self.missing_required().unwrap_or(1) > 0 {
+                self.toast("Finish the setup first (Claude sign-in).", false);
+            } else {
+                bg_cli(&["learn", &uid.to_string()]);
+                self.toast(
+                    "Learning started — it takes a few minutes. Keep using your PC normally.",
+                    true,
+                );
+            }
+        }
+    }
+
+    // =========================================================== Vault tab
+    fn open_note(&mut self, rel: &str) {
+        if let Some(cur) = self.vault.current.take() {
+            if cur != rel {
+                self.vault.history.push(cur);
+            }
+        }
+        self.vault.current = Some(rel.to_string());
+        self.vault.parsed = None;
+        self.tab = Tab::Vault;
+    }
+
+    fn vault_ui(&mut self, ui: &mut egui::Ui) {
+        if self
+            .vault
+            .tree_loaded
+            .is_none_or(|t| t.elapsed() > Duration::from_secs(20))
+        {
+            self.vault.tree = crate::gamesview::vault_tree(&self.ctx);
+            self.vault.tree_loaded = Some(Instant::now());
+        }
+        if self.vault.current.is_none() {
+            self.vault.current = Some("00 Dashboard.md".into());
+        }
+        let cur = self.vault.current.clone().unwrap();
+        if self.vault.parsed.as_ref().is_none_or(|p| p.0 != cur) {
+            let text = std::fs::read_to_string(self.ctx.vault().join(&cur))
+                .unwrap_or_else(|_| "# Not found\nThis note doesn't exist yet.".into());
+            let (fm, blocks) = crate::vaultview::parse(&text);
+            self.vault.parsed = Some((cur.clone(), fm, blocks));
+        }
+        let mut nav: Option<String> = None;
+        let total_h = ui.available_height();
+        ui.horizontal_top(|ui| {
+            // left: list of notes
+            ui.vertical(|ui| {
+                ui.set_width(210.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.vault.search)
+                        .hint_text("Find a note…")
+                        .desired_width(200.0),
+                );
+                ui.add_space(4.0);
+                let q = self.vault.search.to_lowercase();
+                egui::ScrollArea::vertical()
+                    .id_salt("vault-tree")
+                    .max_height(total_h - 40.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (folder, files) in &self.vault.tree {
+                            let shown: Vec<&String> = files
+                                .iter()
+                                .filter(|f| q.is_empty() || f.to_lowercase().contains(&q))
+                                .collect();
+                            if shown.is_empty() {
+                                continue;
+                            }
+                            if *folder == "Dashboard" {
+                                if ui
+                                    .selectable_label(
+                                        cur == "00 Dashboard.md",
+                                        RichText::new("Dashboard").strong(),
+                                    )
+                                    .clicked()
+                                {
+                                    nav = Some("00 Dashboard.md".into());
+                                }
+                                continue;
+                            }
+                            egui::CollapsingHeader::new(
+                                RichText::new(format!("{folder} ({})", shown.len())).strong(),
+                            )
+                            .default_open(*folder == "Games" || !q.is_empty())
+                            .show(ui, |ui| {
+                                for f in shown.iter().take(200) {
+                                    let name =
+                                        f.rsplit('/').next().unwrap_or(f).trim_end_matches(".md");
+                                    if ui.selectable_label(**f == cur, name).clicked() {
+                                        nav = Some((*f).clone());
+                                    }
+                                }
+                            });
+                        }
+                    });
+            });
+            ui.separator();
+            // right: the note
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!self.vault.history.is_empty(), egui::Button::new("← Back"))
+                        .clicked()
+                    {
+                        if let Some(prev) = self.vault.history.pop() {
+                            self.vault.current = Some(prev);
+                            self.vault.parsed = None;
+                        }
+                    }
+                    ui.label(
+                        RichText::new(cur.trim_end_matches(".md"))
+                            .color(MUTED)
+                            .small(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Open in Obsidian").clicked() {
+                            let (ctx, n) = (self.ctx.clone(), cur.clone());
+                            std::thread::spawn(move || crate::setup::open_note(&ctx, &n));
+                        }
+                    });
+                });
+                ui.separator();
+                if let Some((_, fm, blocks)) = &self.vault.parsed {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("note", cur.clone()))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if let Some(t) = crate::vaultview::render(ui, blocks, fm) {
+                                nav = Some(t);
+                            }
+                        });
+                }
+            });
+        });
+        if let Some(t) = nav {
+            match crate::gamesview::resolve(&self.ctx, &t) {
+                Some(rel) => {
+                    if self.vault.current.as_deref() != Some(rel.as_str()) {
+                        self.open_note(&rel);
+                    }
+                }
+                None => self.toast(format!("Note not found: {t}"), false),
+            }
+        }
+    }
+
+    // ============================================================ chrome
+    /// Always visible, top-right: "Check for updates" / "Up to date" / "Update to vX".
+    fn update_button(&mut self, ui: &mut egui::Ui) {
+        let state = self.sh.lock().unwrap().upd.clone();
+        match state {
+            Upd::Checking => {
+                ui.add_enabled(false, egui::Button::new(RichText::new("Checking for updates…").small()));
+            }
+            Upd::Installing => {
+                ui.add(egui::Spinner::new());
+                ui.label(RichText::new("Updating…").color(AMBER).small());
+            }
+            Upd::Available(v) => {
+                if ui.add(btn(&format!("Update to v{v}"), AMBER, 0.0, 28.0)).on_hover_text("Downloads the new version and restarts ROX-AI. Your settings, vault and history are kept.").clicked() {
+                    self.sh.lock().unwrap().upd = Upd::Installing;
+                    let (ctx, sh) = (self.ctx.clone(), self.sh.clone());
+                    std::thread::spawn(move || match crate::update::run(&ctx, false) {
+                        Ok(_) => std::process::exit(0),
+                        Err(e) => {
+                            let mut g = sh.lock().unwrap();
+                            g.upd = Upd::Failed(e.to_string());
+                            g.toast = Some((format!("Update failed: {e}"), false));
+                        }
+                    });
+                }
+            }
+            Upd::UpToDate => {
+                if ui.add(egui::Button::new(RichText::new("✔ Up to date").small().color(ACC))).on_hover_text("Click to check again").clicked() {
+                    self.sh.lock().unwrap().upd = Upd::Checking;
+                    let sh = self.sh.clone();
+                    std::thread::spawn(move || check_updates(&sh));
+                }
+            }
+            Upd::Failed(e) => {
+                if ui.add(egui::Button::new(RichText::new("Check for updates").small())).on_hover_text(format!("Last check failed: {e}")).clicked() {
+                    self.sh.lock().unwrap().upd = Upd::Checking;
+                    let sh = self.sh.clone();
+                    std::thread::spawn(move || check_updates(&sh));
+                }
+            }
+        }
     }
 
     fn more_menu(&mut self, ui: &mut egui::Ui) {
@@ -802,20 +1316,9 @@ impl App {
                 self.wizard = Some(0);
                 ui.close();
             }
-            if ui.button("Check for updates").clicked() {
-                let sh = self.sh.clone();
-                std::thread::spawn(move || {
-                    let msg = match crate::update::check() {
-                        Ok(s) if s.update_available => {
-                            let v = s.latest.map(|l| l.version);
-                            sh.lock().unwrap().update = v.clone();
-                            (format!("Update available: v{} — click the yellow button.", v.unwrap_or_default()), true)
-                        }
-                        Ok(s) => (format!("You have the latest version (v{}).", s.current), true),
-                        Err(e) => (format!("Couldn't check for updates: {e}"), false),
-                    };
-                    sh.lock().unwrap().toast = Some(msg);
-                });
+            if ui.button("Open the vault in Obsidian").clicked() {
+                let ctx = self.ctx.clone();
+                std::thread::spawn(move || crate::setup::open_vault(&ctx));
                 ui.close();
             }
             if ui.button("Open the ROX-AI folder").clicked() {
@@ -849,27 +1352,71 @@ impl App {
         let idle = self.sh.lock().unwrap().job.is_none();
         if idle
             && self.last_deps.elapsed()
-                > Duration::from_secs(if self.wizard.is_some() { 6 } else { 20 })
+                > Duration::from_secs(if self.wizard.is_some() { 6 } else { 30 })
         {
             self.refresh_deps();
         }
+        if self.last_tick.elapsed() > Duration::from_millis(1500) {
+            self.tick();
+        }
+        // header: logo · tabs · update button · version
         ui.horizontal(|ui| {
             ui.label(RichText::new("ROX-AI").size(24.0).strong().color(ACC));
+            ui.add_space(14.0);
+            if self.wizard.is_none() {
+                for (t, label) in [
+                    (Tab::Home, "Home"),
+                    (Tab::Games, "Games"),
+                    (Tab::Vault, "Vault"),
+                ] {
+                    let sel = self.tab == t;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(label).size(15.0).strong().color(if sel {
+                                    Color32::BLACK
+                                } else {
+                                    Color32::WHITE
+                                }),
+                            )
+                            .fill(if sel { ACC } else { CARD })
+                            .corner_radius(8.0)
+                            .min_size(egui::vec2(78.0, 30.0)),
+                        )
+                        .clicked()
+                    {
+                        self.tab = t;
+                    }
+                }
+            } else {
+                ui.label(RichText::new("Setup").color(MUTED));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
                     RichText::new(format!("v{}", crate::VERSION))
                         .color(MUTED)
                         .small(),
                 );
-                if self.wizard.is_some() {
-                    ui.label(RichText::new("Setup").color(MUTED));
+                self.update_button(ui);
+                if self.wizard.is_none() {
+                    self.more_menu(ui);
                 }
             });
         });
         ui.add_space(12.0);
         match self.wizard {
             Some(step) => self.wizard_ui(ui, step),
-            None => self.home_ui(ui),
+            None => {
+                match self.tab {
+                    Tab::Home => self.home_ui(ui),
+                    Tab::Games => self.games_ui(ui),
+                    Tab::Vault => self.vault_ui(ui),
+                }
+                if let Some((m, ok)) = self.sh.lock().unwrap().toast.clone() {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(m).color(if ok { ACC } else { RED }));
+                }
+            }
         }
     }
 }
@@ -879,12 +1426,24 @@ impl eframe::App for App {
         ui.ctx().request_repaint_after(Duration::from_millis(400));
         egui::Frame::new()
             .fill(BG)
-            .inner_margin(22.0)
+            .inner_margin(20.0)
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 self.body(ui)
             });
     }
+}
+
+/// Ask GitHub whether a newer release exists and update the button.
+fn check_updates(sh: &Arc<Mutex<Shared>>) {
+    let st = match crate::update::check() {
+        Ok(s) if s.update_available => {
+            Upd::Available(s.latest.map(|l| l.version).unwrap_or_default())
+        }
+        Ok(_) => Upd::UpToDate,
+        Err(e) => Upd::Failed(e.to_string()),
+    };
+    sh.lock().unwrap().upd = st;
 }
 
 /// Use Windows' own UI font (Segoe UI) so the app looks native; symbols fall back to Segoe UI Symbol.
@@ -924,8 +1483,8 @@ pub fn run(ctx: Ctx) -> anyhow::Result<()> {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("ROX-AI")
-            .with_inner_size([680.0, 700.0])
-            .with_min_inner_size([600.0, 620.0])
+            .with_inner_size([980.0, 720.0])
+            .with_min_inner_size([760.0, 600.0])
             .with_icon(icon),
         ..Default::default()
     };
@@ -937,7 +1496,8 @@ pub fn run(ctx: Ctx) -> anyhow::Result<()> {
             let mut v = egui::Visuals::dark();
             v.panel_fill = BG;
             v.window_fill = BG;
-            v.selection.bg_fill = ACC;
+            v.selection.bg_fill = Color32::from_rgb(0, 120, 95);
+            v.hyperlink_color = ACC;
             cc.egui_ctx.set_visuals(v);
             cc.egui_ctx.style_mut_of(egui::Theme::Dark, |s| {
                 s.spacing.button_padding = egui::vec2(12.0, 6.0);

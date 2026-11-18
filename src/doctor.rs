@@ -88,7 +88,7 @@ pub fn checks(ctx: &Ctx, network: bool) -> Vec<Check> {
                 .unwrap_or("not registered".into()),
             "roxai setup",
         ));
-        for t in ["Daily Chart Scan", "Weekly Playtests"] {
+        for t in ["Daily Chart Scan", "Learning"] {
             let st = S::task_status(t);
             out.push(c(
                 &format!("Task: {t}"),

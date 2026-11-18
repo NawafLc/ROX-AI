@@ -245,13 +245,34 @@ pub fn create_tasks(ctx: &Ctx) -> Value {
         "PT5M",
         "",
     );
-    let play = task_xml(ctx, "ROX-AI: checks hourly if the weekly AI playtest run is due and the PC is idle, then runs it.", &s.playtest_check_time, "autopilot --scheduled", "PT11H", "PT20M",
-        "<Repetition><Interval>PT1H</Interval><Duration>PT12H</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>");
-    json!({"Daily Chart Scan": create_task(ctx, "Daily Chart Scan", &scan), "Weekly Playtests": create_task(ctx, "Weekly Playtests", &play)})
+    let mut out = json!({"Daily Chart Scan": create_task(ctx, "Daily Chart Scan", &scan)});
+    // legacy name from the playtesting-only versions
+    let _ = run_capture(
+        "schtasks",
+        &[
+            "/Delete",
+            "/TN",
+            &format!("{TASK_FOLDER}\\Weekly Playtests"),
+            "/F",
+        ],
+        Duration::from_secs(30),
+    );
+    if ctx.is_active() {
+        let learn = task_xml(ctx, "ROX-AI: checks hourly if it's time for Claude to learn new chart games from YouTube videos, then does it (no screen use).", &s.playtest_check_time, "autopilot --scheduled", "PT11H", "PT20M",
+            "<Repetition><Interval>PT1H</Interval><Duration>PT12H</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>");
+        out["Learning"] = json!(create_task(ctx, "Learning", &learn));
+    } else {
+        let _ = run_capture(
+            "schtasks",
+            &["/Delete", "/TN", &format!("{TASK_FOLDER}\\Learning"), "/F"],
+            Duration::from_secs(30),
+        );
+    }
+    out
 }
 
 pub fn remove_tasks() {
-    for n in ["Daily Chart Scan", "Weekly Playtests"] {
+    for n in ["Daily Chart Scan", "Learning", "Weekly Playtests"] {
         let _ = run_capture(
             "schtasks",
             &["/Delete", "/TN", &format!("{TASK_FOLDER}\\{n}"), "/F"],
@@ -466,6 +487,27 @@ pub fn register_obsidian_vault(ctx: &Ctx) -> String {
 /// Open the vault in Obsidian, whatever state Obsidian is in. Never shows an error dialog:
 ///   link works → use it · Obsidian installed but never opened → register vault + start Obsidian
 ///   Obsidian missing → open the folder in Explorer.
+/// Open one note (path relative to the vault) in Obsidian, or with the default app.
+pub fn open_note(ctx: &Ctx, rel: &str) {
+    let file = ctx.vault().join(rel);
+    let path = file.to_string_lossy().into_owned();
+    if cfg!(windows) && obsidian_protocol_registered() {
+        let enc: String = path
+            .bytes()
+            .map(|b| {
+                if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                    (b as char).to_string()
+                } else {
+                    format!("%{b:02X}")
+                }
+            })
+            .collect();
+        crate::util::open_path(&format!("obsidian://open?path={enc}"));
+    } else {
+        crate::util::open_path(&path);
+    }
+}
+
 pub fn open_vault(ctx: &Ctx) -> String {
     let path = ctx.vault().to_string_lossy().into_owned();
     if !cfg!(windows) {
@@ -542,13 +584,14 @@ pub fn apply_auto_run(ctx: &Ctx) -> String {
             .store
             .get("tasks_exe")
             .and_then(|v| v.as_str().map(String::from));
-        if current.as_deref() != Some(exe.as_str())
+        let want = format!("{exe}|{}", ctx.settings.mode);
+        if current.as_deref() != Some(want.as_str())
             || task_status("Daily Chart Scan").is_none()
-            || task_status("Weekly Playtests").is_none()
+            || (ctx.is_active() == task_status("Learning").is_none())
         {
             let r = create_tasks(ctx);
             if r.as_object().is_some_and(|o| o.values().all(|v| v == "ok")) {
-                let _ = ctx.store.set("tasks_exe", json!(exe));
+                let _ = ctx.store.set("tasks_exe", json!(want));
                 return "on".into();
             }
             return format!("failed: {r}");

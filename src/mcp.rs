@@ -18,9 +18,57 @@ const PROTOCOLS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11
 pub const INSTRUCTIONS: &str = "ROX-AI studies the Roblox charts and maintains an Obsidian vault with one detailed template note per game.
 Typical flows:
 - \"What's trending?\" → charts / game_info.
-- \"Playtest <game>\" → read playbook(universe_id), then playtest_start → look/act/note/snap → playtest_finish.
-- \"Weekly run\" → scan_charts, playtest_queue, playtest each game (one at a time), then vault_write_insight with a market report.
-Never spend Robux, never chat, and always finish sessions with playtest_finish (even after aborts).";
+- \"Learn <game>\" → learn_playbook(universe_id): game_info → youtube_search → youtube_video (several) → vault_write_game_analysis with sources.
+- \"Daily run\" → learn_queue, learn each game one at a time, then vault_write_insight with a market report.
+Games are learned from public data and YouTube videos (no screen use).";
+
+pub fn learn_text(ctx: &Ctx, uid: &str, name: &str, rank: &str) -> String {
+    crate::LEARN_PLAYBOOK
+        .replace("{universe_id}", uid)
+        .replace("{name}", name)
+        .replace("{rank}", rank)
+        .replace("{videos}", &ctx.settings.videos_per_game.to_string())
+}
+
+/// sources: [{"title","url"}] or ["url", ...] → (title, url)
+fn arg_sources(a: &Value) -> Vec<(String, String)> {
+    a.get("sources")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| match x {
+                    Value::String(u) => Some((u.clone(), u.clone())),
+                    Value::Object(o) => {
+                        let url = o
+                            .get("url")
+                            .and_then(|u| u.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let title = o
+                            .get("title")
+                            .and_then(|u| u.as_str())
+                            .unwrap_or(&url)
+                            .to_string();
+                        (!url.is_empty()).then_some((title, url))
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub const PLAYTEST_TOOLS: [&str; 9] = [
+    "playtest_start",
+    "look",
+    "act",
+    "note",
+    "snap",
+    "playtest_finish",
+    "playtest_abort",
+    "session_status",
+    "emergency_stop",
+];
 
 pub fn playbook_text(uid: &str, name: &str, rank: &str) -> String {
     crate::PLAYBOOK
@@ -67,6 +115,12 @@ pub fn tool_defs() -> Vec<Value> {
     let sec_keys = ai_keys().join(", ");
     let t = |name: &str, desc: &str, schema: Value| json!({"name": name, "description": desc, "inputSchema": schema});
     vec![
+        t("youtube_search", "Search YouTube for videos (title, channel, length, views, age, url). Use it to find gameplay, guides and update videos about a Roblox game.",
+          obj(json!({"query": {"type": "string"}, "limit": {"type": "integer", "default": 10}}), &["query"])),
+        t("youtube_video", "Read one YouTube video without watching it: title, channel, description, chapters, timestamped transcript ([mm:ss]) and its thumbnail image.",
+          obj(json!({"video_id": {"type": "string", "description": "video id or URL"}}), &["video_id"])),
+        t("learn_queue", "Chart games that still need learning (never analyzed, stale, or updated since), best first.", obj(json!({"limit": {"type": "integer"}}), &[])),
+        t("learn_playbook", "How to learn a game from data + YouTube videos and what to write. Read it before analyzing a game.", obj(json!({"universe_id": {"type": "integer"}}), &[])),
         t("charts", "Live Roblox chart (default: the configured chart, usually 'top-trending'): rank, players, likes, genre and ROX-AI status for each game. Other sort_ids: top-playing-now, up-and-coming, fun-with-friends, top-revisited.",
           obj(json!({"sort_id": {"type": "string"}, "limit": {"type": "integer", "default": 25}}), &[])),
         t("list_chart_sorts", "List every chart Roblox currently shows (sortId + display name).", obj(json!({}), &[])),
@@ -77,7 +131,7 @@ pub fn tool_defs() -> Vec<Value> {
         t("playbook", "The full playtest playbook (how to play, safety rules, what to write). Read it before a playtest.", obj(json!({"universe_id": {"type": "integer"}}), &[])),
         t("vault_read_game", "Read the 🤖 analysis sections and ✍️ user notes stored for a game (extend rather than overwrite).", obj(json!({"universe_id": {"type": "integer"}}), &["universe_id"])),
         t("vault_write_game_analysis", &format!("Write/replace 🤖 sections of a game's template note without a playtest (e.g. from research). Section keys: {sec_keys}. Score keys (1-10): fun, clarity, retention, monetization_aggressiveness, polish, clone_difficulty, trend_durability."),
-          obj(json!({"universe_id": {"type": "integer"}, "sections": {"type": "object", "additionalProperties": {"type": "string"}}, "scores": {"type": "object", "additionalProperties": {"type": "integer"}}, "one_liner": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}), &["universe_id", "sections"])),
+          obj(json!({"universe_id": {"type": "integer"}, "sections": {"type": "object", "additionalProperties": {"type": "string"}}, "scores": {"type": "object", "additionalProperties": {"type": "integer"}}, "one_liner": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "method": {"type": "string", "enum": ["videos", "data", "playtest"]}, "sources": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "url": {"type": "string"}}}}}), &["universe_id", "sections"])),
         t("vault_write_insight", "Create a note in 05 Insights (weekly market report, comparisons, trends). Link games with [[02 Games/<Name>]].",
           obj(json!({"title": {"type": "string"}, "markdown": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}), &["title", "markdown"])),
         t("vault_write_genre_patterns", "Write the 🤖 'Genre Patterns' section of a genre note.", obj(json!({"genre": {"type": "string"}, "markdown": {"type": "string"}}), &["genre", "markdown"])),
@@ -104,6 +158,7 @@ pub fn tool_defs() -> Vec<Value> {
 pub fn prompt_defs() -> Vec<Value> {
     vec![
         json!({"name": "playtest_game", "description": "Playtest one game and fill its vault template.", "arguments": [{"name": "universe_id", "description": "Roblox universe id", "required": true}]}),
+        json!({"name": "learn_game", "description": "Learn one game from data + YouTube videos and fill its vault template.", "arguments": [{"name": "universe_id", "description": "Roblox universe id", "required": true}]}),
         json!({"name": "weekly_run", "description": "Playtest everything in the queue, then write the weekly market report.", "arguments": []}),
         json!({"name": "market_report", "description": "Write a market/trend report from the vault data without playing.", "arguments": []}),
     ]
@@ -298,14 +353,27 @@ impl Server {
                     arg_u64(a, "universe_id").ok_or_else(|| anyhow!("universe_id required"))?;
                 let secs = arg_map(a, "sections").unwrap_or_default();
                 let p = self.note_for(uid)?;
+                let sources = arg_sources(a);
+                let method = match arg_str(a, "method") {
+                    "" if !sources.is_empty() => "videos",
+                    "" => "data",
+                    m => m,
+                }
+                .to_string();
                 let w = v.write_ai_sections(
                     &p,
                     &secs,
                     arg_map(a, "scores").as_ref(),
                     Some(arg_str(a, "one_liner")),
                     arg_tags(a).as_deref(),
-                    "analyzed",
+                    &format!("analyzed ({method})"),
                 )?;
+                v.set_sources(&p, &method, &sources)?;
+                ctx.store.upsert_game(uid, |g| {
+                    g.analysis_source = Some(method.clone());
+                    g.last_analysis = Some(crate::util::now_iso());
+                    g.videos_used = sources.iter().map(|(_, u)| u.clone()).collect();
+                })?;
                 let saved = secs
                     .keys()
                     .filter(|k| ai_keys().contains(&k.as_str()))
@@ -425,6 +493,46 @@ impl Server {
                 } else {
                     names.join("\n")
                 })
+            }
+            "youtube_search" => {
+                let q = arg_str(a, "query");
+                let n = arg_u64(a, "limit").unwrap_or(10) as usize;
+                Out::json(&serde_json::to_value(crate::youtube::search(q, n)?)?)
+            }
+            "youtube_video" => {
+                let id = arg_str(a, "video_id");
+                let info = crate::youtube::video(id, &ctx.tools_dir())?;
+                let mut text = format!(
+                    "# {}\nChannel: {} · {} min · {} views · {}\n\n## Description\n{}\n",
+                    info.title, info.channel, info.length_seconds / 60, info.views, info.url,
+                    info.description.chars().take(2500).collect::<String>()
+                );
+                if !info.chapters.is_empty() {
+                    text.push_str(&format!("\n## Chapters\n{}\n", info.chapters.join("\n")));
+                }
+                match &info.transcript {
+                    Some(t) => text.push_str(&format!("\n## Transcript ({})\n{t}\n", info.transcript_source)),
+                    None => text.push_str(&format!("\n## Transcript\n_not available: {}_ — use the title, description and chapters, and pick another video if needed.\n", info.note)),
+                }
+                let mut content = vec![json!({"type": "text", "text": text})];
+                if let Some(img) = crate::youtube::thumbnail(&info.id) {
+                    content.insert(0, json!({"type": "image", "data": base64::engine::general_purpose::STANDARD.encode(img), "mimeType": "image/jpeg"}));
+                }
+                Out { content, is_error: false }
+            }
+            "learn_queue" => Out::json(&serde_json::to_value(crate::scan::learn_queue(
+                ctx,
+                arg_u64(a, "limit").map(|x| x as usize).filter(|x| *x > 0),
+            ))?),
+            "learn_playbook" => match arg_u64(a, "universe_id") {
+                Some(uid) => {
+                    let g = ctx.store.game(uid);
+                    Out::text(learn_text(ctx, &uid.to_string(), &g.as_ref().map(|g| g.name.clone()).unwrap_or(uid.to_string()), &g.and_then(|g| g.best_rank).map(|r| r.to_string()).unwrap_or("?".into())))
+                }
+                None => Out::text(learn_text(ctx, "<id>", "<game>", "?")),
+            },
+            "playtest_start" if !ctx.settings.playtesting_enabled => {
+                Out::err("Playtesting is turned off in ROX-AI. Learn the game from videos instead: learn_playbook(universe_id).")
             }
             "playtest_start" => {
                 let uid =
@@ -601,6 +709,12 @@ impl Server {
                 playbook_text(&uid.to_string(), &g.as_ref().map(|g| g.name.clone()).unwrap_or(uid.to_string()), &g.and_then(|g| g.best_rank).map(|r| r.to_string()).unwrap_or("?".into()))
                     + "\n\nStart now with game_info, then vault_read_game, then playtest_start."
             }
+            "learn_game" => {
+                let uid = arg_u64(args, "universe_id").ok_or_else(|| anyhow!("universe_id required"))?;
+                let g = self.ctx.store.game(uid);
+                learn_text(&self.ctx, &uid.to_string(), &g.as_ref().map(|g| g.name.clone()).unwrap_or(uid.to_string()), &g.and_then(|g| g.best_rank).map(|r| r.to_string()).unwrap_or("?".into()))
+                    + "\n\nStart now with game_info."
+            }
             "weekly_run" => "Run the ROX-AI weekly cycle:\n1. scan_charts()\n2. playtest_queue() and playtest every listed game one after another, following playbook() exactly (always playtest_finish each).\n3. Then write a weekly market report with vault_write_insight (title 'Weekly Market Report'): genre shifts, rising mechanics, monetization patterns, best opportunities to build, with [[links]] to game notes; and update vault_write_genre_patterns for the top 3 genres.".into(),
             "market_report" => "Read '00 Dashboard.md' and the latest notes in '01 Charts' (vault_read_note / vault_list), use game_info for the top movers, then write a detailed report with vault_write_insight: what's trending and why, genre mix changes, monetization patterns, 5 concrete game ideas with reasoning, and content ideas.".into(),
             other => return Err(anyhow!("unknown prompt {other}")),
@@ -638,7 +752,14 @@ impl Server {
                 )
             }
             "ping" => ok(json!({})),
-            "tools/list" => ok(json!({"tools": tool_defs()})),
+            "tools/list" => {
+                let pt = self.ctx.settings.playtesting_enabled;
+                let tools: Vec<Value> = tool_defs()
+                    .into_iter()
+                    .filter(|t| pt || !PLAYTEST_TOOLS.contains(&t["name"].as_str().unwrap_or("")))
+                    .collect();
+                ok(json!({"tools": tools}))
+            }
             "prompts/list" => ok(json!({"prompts": prompt_defs()})),
             "resources/list" => ok(json!({"resources": []})),
             "resources/templates/list" => ok(json!({"resourceTemplates": []})),

@@ -10,6 +10,7 @@ pub mod cli;
 pub mod config;
 pub mod deps;
 pub mod doctor;
+pub mod gamesview;
 pub mod mcp;
 pub mod panel;
 pub mod relocate;
@@ -21,7 +22,9 @@ pub mod store;
 pub mod update;
 pub mod util;
 pub mod vault;
+pub mod vaultview;
 pub mod win;
+pub mod youtube;
 
 pub use config::Ctx;
 
@@ -31,3 +34,4 @@ pub const VERSION: &str = match option_env!("ROXAI_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 pub const PLAYBOOK: &str = include_str!("prompts/playtest.md");
+pub const LEARN_PLAYBOOK: &str = include_str!("prompts/learn.md");

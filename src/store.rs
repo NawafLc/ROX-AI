@@ -32,6 +32,10 @@ pub struct Game {
     pub playtest_count: u32,
     pub playtest_fail_count: u32,
     pub last_fail: Option<String>,
+    /// how the 🤖 sections were written: "videos", "data", "playtest"
+    pub analysis_source: Option<String>,
+    pub last_analysis: Option<String>,
+    pub videos_used: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

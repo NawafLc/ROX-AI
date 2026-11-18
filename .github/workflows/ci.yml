@@ -92,7 +92,7 @@ jobs:
           $cfg
           if ($cfg -notmatch [regex]::Escape(($app -replace '\\','\\'))) { throw "Claude Desktop not pointed at the portable exe" }
           schtasks /Query /TN "ROX-AI\Daily Chart Scan" /V /FO LIST | Select-String "Task To Run"
-          schtasks /Query /TN "ROX-AI\Weekly Playtests" | Out-Null
+          schtasks /Query /TN "ROX-AI\Learning" | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "schedule missing" }
       - name: MCP handshake against the portable exe
         shell: pwsh

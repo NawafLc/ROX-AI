@@ -294,20 +294,27 @@ fn mcp_protocol() {
     for n in [
         "charts",
         "game_info",
-        "playtest_start",
-        "look",
-        "act",
-        "note",
-        "snap",
-        "playtest_finish",
-        "playtest_abort",
-        "emergency_stop",
+        "youtube_search",
+        "youtube_video",
+        "learn_queue",
+        "learn_playbook",
         "vault_write_game_analysis",
         "vault_write_insight",
         "system_check",
     ] {
         assert!(names.contains(&n), "missing {n}");
     }
+    // playtesting is off by default: its tools are hidden and refused
+    assert!(!names.contains(&"playtest_start") && !names.contains(&"act"));
+    let r = rpc(
+        &s,
+        "tools/call",
+        json!({"name": "playtest_start", "arguments": {"universe_id": 1}}),
+    );
+    assert!(r["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("turned off"));
     for t in tools["result"]["tools"].as_array().unwrap() {
         assert_eq!(t["inputSchema"]["type"], "object");
     }
@@ -399,4 +406,59 @@ fn settings_set_from_str() {
     assert_eq!(ctx.settings.extra_sorts, vec!["a", "b"]);
     assert!(ctx.settings.allow_chat);
     assert_eq!(ctx.settings.replay_after_days, 14.5);
+}
+
+#[test]
+fn video_learning_is_recorded() {
+    let (_d, ctx, api) = setup();
+    roxai::scan::run_scan(&ctx, api.as_ref(), None, Some(roxai::util::today())).unwrap();
+    assert_eq!(roxai::scan::learn_queue(&ctx, None).len(), 3);
+    let s = Server::new(ctx.clone(), api.clone());
+    let r = rpc(
+        &s,
+        "tools/call",
+        json!({"name": "vault_write_game_analysis", "arguments": {"universe_id": 2, "sections": {"core_loop": "Run, jump, win"},
+            "sources": [{"title": "Obby Rush guide", "url": "https://www.youtube.com/watch?v=abcdefghijk"}, "https://youtu.be/zyxwvutsrqp"]}}),
+    );
+    assert_eq!(r["result"]["isError"], false, "{r}");
+    let g = ctx.store.game(2).unwrap();
+    assert_eq!(g.analysis_source.as_deref(), Some("videos"));
+    assert_eq!(g.videos_used.len(), 2);
+    assert!(g.last_analysis.is_some());
+    let note = std::fs::read_to_string(Vault::new(ctx.vault()).root.join("02 Games/Obby Rush.md"))
+        .unwrap();
+    assert!(
+        note.contains("Learned from YouTube videos")
+            && note.contains("[Obby Rush guide](https://www.youtube.com/watch?v=abcdefghijk)")
+    );
+    assert!(note.contains("analysis_source: \"videos\""));
+    // learned games leave the queue; the dashboard rows show the source
+    let q: Vec<u64> = roxai::scan::learn_queue(&ctx, None)
+        .iter()
+        .map(|x| x.universe_id)
+        .collect();
+    assert!(!q.contains(&2));
+    let rows = roxai::gamesview::rows(&ctx);
+    assert_eq!(
+        rows.iter().find(|r| r.uid == 2).unwrap().source_label(),
+        "Videos"
+    );
+    assert_eq!(
+        rows.iter().find(|r| r.uid == 1).unwrap().source_label(),
+        "Data only"
+    );
+    assert!(roxai::gamesview::resolve(&ctx, "Obby Rush").is_some());
+    // learn playbook mentions the video tools and every section
+    let p = rpc(
+        &s,
+        "prompts/get",
+        json!({"name": "learn_game", "arguments": {"universe_id": "2"}}),
+    );
+    let text = p["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
+    assert!(text.contains("youtube_video") && text.contains("Obby Rush"));
+    for k in roxai::vault::ai_keys() {
+        assert!(text.contains(k), "learn playbook missing {k}");
+    }
 }

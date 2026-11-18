@@ -67,6 +67,44 @@ pub fn ensure_icon(
 }
 
 /// Which games Claude should play next, best first.
+/// Which chart games Claude should learn (from videos) next, best rank first.
+pub fn learn_queue(ctx: &Ctx, limit: Option<usize>) -> Vec<QueueItem> {
+    let s = &ctx.settings;
+    let Some(day) = ctx.store.latest_day(&s.sort_id) else {
+        return vec![];
+    };
+    let games = ctx.store.games();
+    let mut out = vec![];
+    for snap in ctx.store.chart_on(&day, &s.sort_id) {
+        let Some(g) = games.get(&snap.universe_id) else {
+            continue;
+        };
+        let age = g.last_analysis.as_deref().and_then(days_since);
+        let reason = match age {
+            None => Some("not learned yet".to_string()),
+            Some(a) if a >= s.reanalyze_after_days => {
+                Some(format!("last learned {} days ago", a as i64))
+            }
+            Some(a) if a >= 7.0 && days_since(&g.roblox_updated).is_some_and(|u| u < a) => {
+                Some("game updated since".into())
+            }
+            _ => None,
+        };
+        if let Some(reason) = reason {
+            out.push(QueueItem {
+                universe_id: g.universe_id,
+                place_id: g.place_id,
+                title: clean_display_name(&g.name),
+                rank: snap.rank,
+                reason,
+                note: g.note_path.clone(),
+            });
+        }
+    }
+    out.truncate(limit.unwrap_or(s.learn_per_run));
+    out
+}
+
 pub fn playtest_queue(ctx: &Ctx, limit: Option<usize>, day: Option<&str>) -> Vec<QueueItem> {
     let s = &ctx.settings;
     let Some(day) = day

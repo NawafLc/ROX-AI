@@ -247,7 +247,11 @@ pub fn is_due(ctx: &Ctx) -> (bool, String) {
         return (true, "never ran".into());
     };
     let age = days_since(last.finished.as_deref().unwrap_or(&last.started));
-    let iv = ctx.settings.playtest_interval_days;
+    let iv = if ctx.settings.playtesting_enabled {
+        ctx.settings.playtest_interval_days
+    } else {
+        ctx.settings.learn_interval_days
+    };
     match age {
         Some(a) if a < iv - 0.25 => (
             false,
@@ -281,7 +285,11 @@ pub fn run(
         Err(e) => return json!({"status": "skipped", "reason": e.to_string()}),
     };
     let run_id = ctx.store.run_start("autopilot").unwrap_or(0);
-    let res = inner(ctx, api, force, max_games, only, idle_wait);
+    let res = if ctx.settings.playtesting_enabled {
+        inner(ctx, api, force, max_games, only, idle_wait)
+    } else {
+        learn_inner(ctx, api, force, max_games, only)
+    };
     let out = match res {
         Ok((status, v)) => {
             let _ = ctx.store.run_end(run_id, &status, &v.to_string());
@@ -301,6 +309,158 @@ pub fn run(
     };
     drop(lock);
     out
+}
+
+/// Active mode: Claude learns each queued game from public data + YouTube videos (no screen, no Roblox).
+fn learn_inner(
+    ctx: &Ctx,
+    api: &dyn RobloxApi,
+    force: bool,
+    max_games: Option<usize>,
+    only: Option<u64>,
+) -> Result<(String, Value)> {
+    if !ctx.is_active() && only.is_none() {
+        bail!("SKIP: passive mode — only chart data is collected");
+    }
+    clear_stop(ctx);
+    if !force && only.is_none() {
+        let (due, why) = is_due(ctx);
+        if !due {
+            bail!("SKIP: not due: {why}");
+        }
+    }
+    if let Some(b) = blocked(ctx) {
+        if !force {
+            bail!("SKIP: blocked: {b}");
+        }
+    }
+    let (ok, info) = claude_ready(ctx);
+    if !ok {
+        notify(ctx, "ROX-AI: Claude Code missing", &info);
+        bail!("SKIP: {info}");
+    }
+    if ctx
+        .store
+        .chart_on(&crate::util::today(), &ctx.settings.sort_id)
+        .is_empty()
+    {
+        if let Err(e) = crate::scan::run_scan(ctx, api, None, None) {
+            crate::warn!("pre-run scan failed (continuing with last data): {e:#}");
+        }
+    }
+    let queue: Vec<(u64, String, String)> = match only {
+        Some(uid) => {
+            let g = ctx.store.game(uid);
+            vec![(
+                uid,
+                g.as_ref()
+                    .map(|g| g.name.clone())
+                    .unwrap_or(uid.to_string()),
+                g.and_then(|g| g.best_rank)
+                    .map(|r| r.to_string())
+                    .unwrap_or("?".into()),
+            )]
+        }
+        None => crate::scan::learn_queue(ctx, max_games)
+            .into_iter()
+            .map(|q| (q.universe_id, q.title, q.rank.to_string()))
+            .collect(),
+    };
+    let _ = ctx.store.set(
+        "learning_now",
+        json!({"queue": queue.iter().map(|q| q.1.clone()).collect::<Vec<_>>(), "at": now_iso()}),
+    );
+    let mut results = vec![];
+    for (uid, title, rank) in &queue {
+        if ctx.stop_file().exists() {
+            results.push(json!({"game": title, "status": "stopped by user"}));
+            break;
+        }
+        let _ = ctx
+            .store
+            .set("learning_now", json!({"game": title, "at": now_iso()}));
+        let before = ctx.store.game(*uid).and_then(|g| g.last_analysis);
+        let prompt = format!("Learn the Roblox game '{title}' (universe_id {uid}, chart rank {rank}) from public data and YouTube videos — do not play it. First call learn_playbook(universe_id={uid}) and follow it exactly: game_info → vault_read_game → youtube_search → youtube_video for the best videos → vault_write_game_analysis with ALL sections, scores, one_liner, tags, method \"videos\" and sources. Work autonomously; nobody will answer questions.");
+        let r = run_claude(
+            ctx,
+            &prompt,
+            Duration::from_secs(ctx.settings.per_game_timeout_minutes * 60),
+            &uid.to_string(),
+        )?;
+        let after = ctx.store.game(*uid).and_then(|g| g.last_analysis);
+        let status = if after.is_some() && after != before {
+            "learned"
+        } else {
+            "not finished"
+        };
+        crate::info!("learn {title} → {status}");
+        results.push(json!({"game": title, "status": status, "claude": {"returncode": r.returncode, "stopped": r.stopped, "turns": r.turns, "log": r.log}}));
+        if r.auth_problem {
+            ctx.store.set(
+                "blocked_reason",
+                json!({"reason": "Claude Code is not signed in", "at": now_iso()}),
+            )?;
+            notify(
+                ctx,
+                "ROX-AI needs you (once)",
+                "Claude is signed out. Open ROX-AI and click Sign in.",
+            );
+            break;
+        }
+        if r.usage_limit {
+            notify(
+                ctx,
+                "ROX-AI paused",
+                "Claude usage limit reached — the rest will be learned at the next run.",
+            );
+            let _ = ctx.store.set("learning_now", Value::Null);
+            return Ok((
+                "partial".into(),
+                json!({"games": results, "reason": "usage limit"}),
+            ));
+        }
+    }
+    let _ = ctx.store.set("learning_now", Value::Null);
+    // weekly market report
+    let report_due = ctx
+        .store
+        .get("last_report")
+        .and_then(|v| v.as_str().map(String::from))
+        .and_then(|d| days_since(&d))
+        .is_none_or(|d| d >= 7.0);
+    if only.is_none()
+        && report_due
+        && !ctx.stop_file().exists()
+        && results.iter().any(|r| r["status"] == "learned")
+    {
+        let p = "Write this week's ROX-AI market report. Use vault_read_note('00 Dashboard.md'), vault_list('01 Charts') and the latest chart notes, game_info for the biggest movers, and vault_read_game for the games learned recently. Then call vault_write_insight(title='Weekly Market Report', ...) with: chart summary, what is rising and why, genre shifts, common mechanics & monetization patterns, the 5 best opportunities to build a game (with reasoning), and 10 content ideas — link games as [[02 Games/<name>]]. Also call vault_write_genre_patterns for the 3 biggest genres.";
+        if run_claude(ctx, p, Duration::from_secs(20 * 60), "weekly-report")
+            .is_ok_and(|r| r.is_error != Some(true))
+        {
+            let _ = ctx.store.set("last_report", json!(now_iso()));
+        }
+    }
+    let done = results.iter().filter(|r| r["status"] == "learned").count();
+    if !queue.is_empty() {
+        notify(
+            ctx,
+            "ROX-AI learned new games",
+            &format!(
+                "{done}/{} games analyzed from YouTube. Open ROX-AI → Games to read them.",
+                queue.len()
+            ),
+        );
+        let _ = crate::scan::run_scan(ctx, api, None, None); // refresh dashboard
+    }
+    Ok((
+        if done > 0 || queue.is_empty() {
+            "ok"
+        } else {
+            "partial"
+        }
+        .into(),
+        json!({"games": results, "queue": queue.len(), "completed": done}),
+    ))
 }
 
 fn inner(

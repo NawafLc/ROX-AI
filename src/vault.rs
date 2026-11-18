@@ -445,7 +445,7 @@ impl Vault {
         if let Some(i) = icon_rel {
             parts.push(format!("![[{i}|180]]\n"));
         }
-        parts.push("> [!info] ROX-AI game template\n> 📊 sections refresh daily from Roblox · 🤖 sections are written by Claude after playtests · ✍️ **My Notes** is yours and never overwritten.\n".into());
+        parts.push("> [!info] ROX-AI game template\n> 📊 sections refresh daily from Roblox · 🤖 sections are written by Claude (learned from YouTube videos and data) · ✍️ **My Notes** is yours and never overwritten.\n".into());
         parts.push(block("auto", "snapshot", "## 📊 Snapshot\n_pending_") + "\n");
         parts.push(block("auto", "trend", "## 📈 Chart Trend\n_pending_") + "\n");
         for (key, heading, hint) in AI_SECTIONS {
@@ -894,6 +894,36 @@ impl Vault {
                 .unwrap_or_default(),
         );
         out
+    }
+
+    /// "📺 Sources" block + `analysis_source` frontmatter: where Claude's analysis came from.
+    pub fn set_sources(
+        &self,
+        path: &Path,
+        method: &str,
+        sources: &[(String, String)],
+    ) -> Result<()> {
+        let label = match method {
+            "videos" => "Learned from YouTube videos",
+            "playtest" => "Learned by playtesting",
+            _ => "Learned from public data",
+        };
+        let list = if sources.is_empty() {
+            "_No external sources._".to_string()
+        } else {
+            sources
+                .iter()
+                .map(|(t, u)| format!("- [{}]({u})", md_escape(t)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        self.set_block_in(
+            path,
+            "auto",
+            "sources",
+            &format!("## 📺 Sources\n**{label}** · {}\n\n{list}", today()),
+        )?;
+        self.set_fm_value(path, "analysis_source", json!(method))
     }
 
     pub fn set_fm_value(&self, path: &Path, key: &str, v: Value) -> Result<()> {
