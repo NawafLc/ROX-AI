@@ -31,6 +31,8 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    env:
+      ROXAI_VERSION: 2.0.${{ github.run_number }}   # baked into the exe; the Update button compares it with GitHub
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -101,6 +103,14 @@ jobs:
           $out
           if (-not ($out -match '"serverInfo"')) { throw "no initialize response" }
           if (-not ($out -match 'playtest_start')) { throw "tools missing" }
+      - name: Version + update check against GitHub
+        shell: pwsh
+        run: |
+          $exe = "$env:LOCALAPPDATA\ROX-AI\bin\roxai.exe"
+          $v = & $exe --version
+          $v
+          if ($v -notmatch "2\.0\.${{ github.run_number }}") { throw "version not stamped" }
+          & $exe update --check
 
   release:
     needs: [installer, linux]

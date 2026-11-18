@@ -9,7 +9,7 @@ use std::time::Duration;
 #[derive(Parser)]
 #[command(
     name = "roxai",
-    version,
+    version = crate::VERSION,
     about = "ROX-AI — Roblox chart analyst, AI playtester (MCP for Claude) and Obsidian vault builder"
 )]
 pub struct Cli {
@@ -66,6 +66,15 @@ pub enum Cmd {
     Set { key: String, value: String },
     /// Show settings
     Settings,
+    /// Install the latest version from GitHub (keeps settings, vault and history)
+    Update {
+        /// only check, don't install
+        #[arg(long)]
+        check: bool,
+        /// reinstall even if already up to date
+        #[arg(long)]
+        force: bool,
+    },
     /// Windows self-test of input, capture, hooks and scheduler (used by CI)
     Selftest,
 }
@@ -161,6 +170,15 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
             print(format!("{key} = {}", v[&key]));
         }
         Cmd::Settings => print(pretty(&serde_json::to_value(&ctx.settings)?)),
+        Cmd::Update { check, force } => {
+            if check {
+                print(pretty(&serde_json::to_value(crate::update::check()?)?));
+            } else {
+                let msg = crate::update::run(ctx, force)?;
+                crate::autopilot::notify(ctx, "ROX-AI update", &msg);
+                print(msg);
+            }
+        }
         Cmd::Selftest => return Ok(crate::selftest::run(ctx)),
     }
     Ok(0)

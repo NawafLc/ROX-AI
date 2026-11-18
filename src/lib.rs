@@ -16,11 +16,16 @@ pub mod selftest;
 pub mod session;
 pub mod setup;
 pub mod store;
+pub mod update;
 pub mod util;
 pub mod vault;
 pub mod win;
 
 pub use config::Ctx;
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// "2.0.<CI build number>" for release builds (set by CI via ROXAI_VERSION), else the crate version.
+pub const VERSION: &str = match option_env!("ROXAI_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 pub const PLAYBOOK: &str = include_str!("prompts/playtest.md");

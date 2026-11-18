@@ -1,7 +1,10 @@
 # ROX-AI one-click installer (re-run any time to repair or update).
 # Gets roxai.exe (bundled, downloaded, or built from source), installs Obsidian, Roblox, Claude Desktop and
 # Claude Code, then registers the MCP server, scheduled tasks and shortcuts, builds the vault and runs the first scan.
-param([switch]$CI)  # -CI: automated test mode (no app installs, no sign-in windows)
+param(
+  [switch]$CI,      # automated test mode (no app installs, no sign-in windows)
+  [switch]$Update   # started by the app's Update button: no sign-in step, reopen the panel at the end
+)
 $ErrorActionPreference = "Continue"  # native tools write to stderr; we check exit codes ourselves
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -40,6 +43,7 @@ function Winget-Install($id, $name) {
 }
 
 Write-Host ""
+if ($Update) { $Host.UI.RawUI.WindowTitle = "Updating ROX-AI"; Write-Host "  Updating ROX-AI - this window closes by itself." -ForegroundColor Green }
 Write-Host "  ROX-AI installer" -ForegroundColor Green
 Write-Host "  Everything is automatic. You'll only be asked to sign in (Roblox alt account + Claude) at the end."
 
@@ -83,7 +87,9 @@ if (-not $found) {
   if ($code -ne 0) { throw "Building ROX-AI failed (see $Log)" }
   $found = Join-Path $Src "target\release"
 }
-Copy-Item (Join-Path $found "roxai.exe") $Exe -Force
+# copy with retries: a just-stopped process can hold the file for a moment
+$copied = Retry { Copy-Item (Join-Path $found "roxai.exe") $Exe -Force -ErrorAction Stop } 5
+if (-not $copied) { throw "Could not replace roxai.exe (is ROX-AI still running?)" }
 if (Test-Path (Join-Path $found "roxaiw.exe")) { Copy-Item (Join-Path $found "roxaiw.exe") $ExeW -Force } else { Copy-Item $Exe $ExeW -Force }
 $ver = & $Exe --version
 if ($LASTEXITCODE -ne 0) { throw "roxai.exe does not run" }
@@ -135,8 +141,8 @@ Step "Vault, Claude registration, scheduled tasks, shortcuts"
 & $Exe setup
 if ($LASTEXITCODE -ne 0) { Warn "setup reported a problem (see log)" }
 
-Step "First chart scan (about a minute)"
-& $Exe scan
+Step "Chart scan (about a minute)"
+if ($Update) { & $Exe scan --if-needed } else { & $Exe scan }
 if ($LASTEXITCODE -ne 0) { Warn "first scan failed - it will retry automatically every day" }
 
 Step "Health check"
@@ -146,6 +152,16 @@ Step "Health check"
 Remove-Item -Recurse -Force (Join-Path $AppDir "venv"), (Join-Path $AppDir "app") -ErrorAction SilentlyContinue
 
 if ($CI) { Write-Host "CI mode: done."; Stop-Transcript | Out-Null; exit 0 }
+
+if ($Update) {
+  Start-Process $ExeW -ArgumentList "panel" -WorkingDirectory $AppDir
+  Write-Host ""
+  Write-Host "ROX-AI updated to $ver. Your settings, vault and history were kept." -ForegroundColor Green
+  Write-Host "(If Claude Desktop is open, restart it once so it uses the new version.)" -ForegroundColor Green
+  Stop-Transcript | Out-Null
+  Start-Sleep -Seconds 6
+  exit 0
+}
 
 # ---------------------------------------------------------------- 4. sign-ins (the only manual part)
 Write-Host ""

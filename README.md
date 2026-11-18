@@ -81,7 +81,11 @@ The `roxai` tools show up in Claude Desktop. Just ask:
 ## Control panel
 
 Desktop shortcut **ROX-AI** opens the panel, with live status, system health, the queue and buttons:
-Open Vault · Scan now · Run playtests now · STOP · I fixed the login · Repair setup · Logs · Settings.
+Open Vault · Scan now · Run playtests now · STOP · I fixed the login · Repair setup · Logs · Settings · **⬆️ Update**.
+
+**Updating:** the panel checks GitHub when it opens; when a new release exists the button turns green (*Update to vX*).
+One click downloads it, runs the installer in update mode and reopens ROX-AI. Settings, vault and history are kept.
+Same from a terminal: `roxai update` (or `roxai update --check`).
 
 ## Settings
 

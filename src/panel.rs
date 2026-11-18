@@ -34,9 +34,18 @@ struct Info {
     queue: String,
 }
 
+#[derive(Default, Clone)]
+struct UpdateState {
+    checking: bool,
+    latest: Option<String>,
+    available: bool,
+    error: Option<String>,
+}
+
 struct PanelApp {
     ctx: Ctx,
     info: Arc<Mutex<Info>>,
+    update: Arc<Mutex<UpdateState>>,
     msg: (String, egui::Color32),
     session: String,
     last_tick: Instant,
@@ -92,6 +101,45 @@ impl PanelApp {
         };
     }
 
+    /// Ask GitHub (in the background) whether a newer release exists.
+    fn check_update(&mut self) {
+        let st = self.update.clone();
+        st.lock().unwrap().checking = true;
+        std::thread::spawn(move || {
+            let r = crate::update::check();
+            let mut g = st.lock().unwrap();
+            g.checking = false;
+            match r {
+                Ok(s) => {
+                    g.latest = s.latest.map(|l| l.version);
+                    g.available = s.update_available;
+                    g.error = None;
+                }
+                Err(e) => g.error = Some(e.to_string()),
+            }
+        });
+    }
+
+    fn click_update(&mut self) {
+        let st = self.update.lock().unwrap().clone();
+        if st.available {
+            self.fire(&["update"], "⬆️ Downloading the update… an installer window will open, finish, and reopen ROX-AI.");
+        } else {
+            self.check_update();
+            self.msg = (
+                match (&st.error, &st.latest) {
+                    (Some(e), _) => format!("Update check failed: {e}"),
+                    (None, Some(_)) => format!(
+                        "✅ You have the latest version (v{}). Re-checking GitHub…",
+                        crate::VERSION
+                    ),
+                    _ => "Checking GitHub for updates…".into(),
+                },
+                ACC,
+            );
+        }
+    }
+
     fn fire(&mut self, args: &[&str], msg: &str) {
         bg_cli(args);
         self.msg = (msg.to_string(), ACC);
@@ -111,6 +159,14 @@ impl PanelApp {
                 egui::RichText::new("Roblox chart analyst · AI playtester · Obsidian vault")
                     .color(MUTED),
             );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("🔄 Refresh").clicked() {
+                    self.refresh();
+                    self.tick();
+                    self.check_update();
+                }
+                ui.label(egui::RichText::new(format!("v{}", crate::VERSION)).color(MUTED));
+            });
         });
         ui.add_space(6.0);
         egui::Frame::new()
@@ -180,9 +236,19 @@ impl PanelApp {
                     &crate::config::Settings::path(&self.ctx.home).to_string_lossy(),
                 );
             }
-            if ui.add(big("🔄 Refresh", CARD)).clicked() {
-                self.refresh();
-                self.tick();
+            let us = self.update.lock().unwrap().clone();
+            let (label, fill) = if us.available {
+                (
+                    format!("⬆️ Update to v{}", us.latest.clone().unwrap_or_default()),
+                    ACC,
+                )
+            } else if us.checking {
+                ("⏳ Checking for updates…".to_string(), CARD)
+            } else {
+                ("⬆️ Check for updates".to_string(), CARD)
+            };
+            if ui.add(big(&label, fill)).clicked() {
+                self.click_update();
             }
         });
         if !self.msg.0.is_empty() {
@@ -262,6 +328,7 @@ pub fn run(ctx: Ctx) -> anyhow::Result<()> {
     let mut app = PanelApp {
         ctx,
         info: Arc::new(Mutex::new(Info::default())),
+        update: Arc::new(Mutex::new(UpdateState::default())),
         msg: (String::new(), ACC),
         session: String::new(),
         last_tick: Instant::now(),
@@ -269,6 +336,7 @@ pub fn run(ctx: Ctx) -> anyhow::Result<()> {
     };
     app.tick();
     app.refresh();
+    app.check_update();
     eframe::run_native(
         "ROX-AI",
         opts,
