@@ -104,7 +104,7 @@ jobs:
           ) -join "`n"
           $out = $in | & "user\ROX-AI\roxai.exe" mcp
           if (-not ($out -match '"serverInfo"')) { throw "no initialize response" }
-          if (-not ($out -match 'playtest_start')) { throw "tools missing" }
+          if (-not ($out -match 'youtube_search')) { throw "tools missing" }
       - name: Version + update check
         shell: pwsh
         run: |
@@ -132,7 +132,7 @@ jobs:
           Set-Content solo\in.txt $req
           Start-Process solo\ROX-AI.exe -ArgumentList "mcp" -RedirectStandardInput solo\in.txt -RedirectStandardOutput solo\out.txt -Wait -NoNewWindow
           $out = Get-Content solo\out.txt -Raw
-          if (-not ($out -match 'playtest_start')) { throw "single exe MCP failed: $out" }
+          if (-not ($out -match 'youtube_search')) { throw "single exe MCP failed: $out" }
           Start-Process solo\ROX-AI.exe -ArgumentList "setup" -Wait
           if (-not (Test-Path "solo\data\settings.json")) { throw "single exe not portable" }
           $cfg = Get-Content "$env:APPDATA\Claude\claude_desktop_config.json" -Raw
