@@ -45,11 +45,10 @@ pub enum Cmd {
     Queue,
     /// Health check
     Doctor,
-    /// Vault, Claude registration, scheduled tasks, shortcuts
-    Setup {
-        #[arg(long)]
-        open: bool,
-    },
+    /// Make sure everything is connected (runs automatically when the app opens)
+    Setup,
+    /// Remove the schedule and Claude connections from this PC (your folder stays)
+    Remove,
     /// Clear an account blocker after you fixed the login
     Unblock,
     /// Stop any running playtest immediately
@@ -145,10 +144,11 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
             None,
         ))?)),
         Cmd::Doctor => print(crate::doctor::report_text(ctx, true)),
-        Cmd::Setup { open } => {
+        Cmd::Setup => {
             let api = HttpApi::new()?;
-            print(pretty(&crate::setup::setup_all(ctx, &api, open)));
+            print(pretty(&crate::setup::ensure(ctx, Some(&api))));
         }
+        Cmd::Remove => print(crate::setup::remove_from_pc(ctx)),
         Cmd::Unblock => {
             ctx.store.set("blocked_reason", serde_json::Value::Null)?;
             print("Blocker cleared — playtests will resume at the next check.");

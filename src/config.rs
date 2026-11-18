@@ -12,11 +12,33 @@ pub fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Folder that holds the exe (the portable app folder).
+pub fn app_folder() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn writable(dir: &Path) -> bool {
+    let _ = std::fs::create_dir_all(dir);
+    let probe = dir.join(".write-test");
+    let ok = std::fs::write(&probe, b"ok").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+/// Portable by default: everything lives in a `data` folder next to the exe.
+/// (Override with ROXAI_HOME; falls back to the user profile only if the app folder is read-only.)
 pub fn default_home() -> PathBuf {
     if let Ok(h) = std::env::var("ROXAI_HOME") {
         if !h.trim().is_empty() {
             return PathBuf::from(h);
         }
+    }
+    let portable = app_folder().join("data");
+    if writable(&portable) {
+        return portable;
     }
     if cfg!(windows) {
         if let Ok(l) = std::env::var("LOCALAPPDATA") {
@@ -26,8 +48,9 @@ pub fn default_home() -> PathBuf {
     home_dir().join(".roxai")
 }
 
-pub fn default_vault() -> PathBuf {
-    home_dir().join("Documents").join("ROX-AI Vault")
+/// Old (installed) location used by versions before the portable app.
+pub fn legacy_home() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|l| PathBuf::from(l).join("ROX-AI"))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -63,12 +86,14 @@ pub struct Settings {
     pub kill_hotkey: String,
     pub allow_chat: bool,
     pub stop_on_human_input: bool,
+    /// daily scan + weekly playtests in the background (Windows scheduled tasks); off = only when you click
+    pub auto_run: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            vault_path: default_vault().to_string_lossy().into_owned(),
+            vault_path: String::new(), // empty = "ROX-AI Vault" next to the data folder (portable)
             sort_id: "top-trending".into(),
             chart_limit: 25,
             extra_sorts: vec!["top-playing-now".into(), "up-and-coming".into()],
@@ -92,6 +117,7 @@ impl Default for Settings {
             kill_hotkey: "ctrl+shift+q".into(),
             allow_chat: false,
             stop_on_human_input: true,
+            auto_run: true,
         }
     }
 }
@@ -183,8 +209,16 @@ impl Ctx {
         self.settings = Settings::load(&self.home);
     }
 
+    /// The Obsidian vault: settings.vault_path if set, else "ROX-AI Vault" beside the data folder.
     pub fn vault(&self) -> PathBuf {
-        PathBuf::from(&self.settings.vault_path)
+        if self.settings.vault_path.trim().is_empty() {
+            self.home
+                .parent()
+                .unwrap_or(&self.home)
+                .join("ROX-AI Vault")
+        } else {
+            PathBuf::from(&self.settings.vault_path)
+        }
     }
 
     pub fn logs_dir(&self) -> PathBuf {

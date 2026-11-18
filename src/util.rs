@@ -197,14 +197,14 @@ pub fn run_capture(program: &str, args: &[&str], timeout: Duration) -> Result<(i
 }
 
 /// Path of the windowless twin (roxaiw.exe) next to the current exe, or the current exe.
+/// The windowless app exe (ROX-AI.exe) next to the current exe, or the current exe.
 pub fn bg_exe() -> PathBuf {
     let me = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("roxai"));
-    let name = if cfg!(windows) {
-        "roxaiw.exe"
+    let w = me.with_file_name(if cfg!(windows) {
+        "ROX-AI.exe"
     } else {
-        "roxaiw"
-    };
-    let w = me.with_file_name(name);
+        "ROX-AI"
+    });
     if w.exists() {
         w
     } else {
@@ -212,10 +212,10 @@ pub fn bg_exe() -> PathBuf {
     }
 }
 
+/// The console helper (roxai.exe) next to the current exe — what Claude starts as the MCP server.
 pub fn console_exe() -> PathBuf {
     let me = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("roxai"));
-    let name = if cfg!(windows) { "roxai.exe" } else { "roxai" };
-    let c = me.with_file_name(name);
+    let c = me.with_file_name(if cfg!(windows) { "roxai.exe" } else { "roxai" });
     if c.exists() {
         c
     } else {
@@ -223,10 +223,28 @@ pub fn console_exe() -> PathBuf {
     }
 }
 
+/// Open a file, folder or URL with its default app (Windows shell; no console involved).
 pub fn open_path(p: &str) {
     #[cfg(windows)]
     {
-        let _ = hidden_command("cmd").args(["/c", "start", "", p]).spawn();
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        let w = |s: &str| {
+            s.encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>()
+        };
+        let (op, target) = (w("open"), w(p));
+        unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                op.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            );
+        }
     }
     #[cfg(not(windows))]
     {

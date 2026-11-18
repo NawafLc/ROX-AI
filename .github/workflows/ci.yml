@@ -43,13 +43,12 @@ jobs:
         run: cargo build --release
       - name: Self-test (real Win32 input, capture, hooks, scheduler)
         run: .\target\release\roxai.exe selftest
-      - name: Package
+      - name: Package (portable folder)
         shell: pwsh
         run: |
           $d = "dist\ROX-AI"
-          New-Item -ItemType Directory -Force -Path "$d\scripts" | Out-Null
-          Copy-Item target\release\roxai.exe, target\release\roxaiw.exe, INSTALL.bat, UNINSTALL.bat, README.md $d
-          Copy-Item scripts\*.ps1 "$d\scripts"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          Copy-Item target\release\ROX-AI.exe, target\release\roxai.exe, dist-files\README.txt $d
           Compress-Archive -Path $d -DestinationPath dist\ROX-AI-windows-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
@@ -62,7 +61,7 @@ jobs:
           path: ${{ runner.temp }}/roxai-capture.jpg
           if-no-files-found: ignore
 
-  installer:
+  portable:
     needs: windows
     runs-on: windows-latest
     steps:
@@ -72,48 +71,57 @@ jobs:
       - name: Unzip like a user would
         shell: pwsh
         run: Expand-Archive ROX-AI-windows-x64.zip -DestinationPath user
-      - name: Run INSTALL (CI mode)
+      - name: First start (silent setup + chart scan)
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File user\ROX-AI\scripts\install.ps1 -CI
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-      - name: Verify install
+          $app = "user\ROX-AI"
+          & "$app\roxai.exe" setup
+          & "$app\roxai.exe" scan
+          if ($LASTEXITCODE -ne 0) { throw "scan failed" }
+      - name: Verify everything stayed in the folder
         shell: pwsh
         run: |
-          $exe = "$env:LOCALAPPDATA\ROX-AI\bin\roxai.exe"
-          & $exe queue
-          if (-not (Test-Path "$env:USERPROFILE\Documents\ROX-AI Vault\00 Dashboard.md")) { throw "vault missing" }
-          $n = (Get-ChildItem "$env:USERPROFILE\Documents\ROX-AI Vault\02 Games").Count
+          $app = (Resolve-Path "user\ROX-AI").Path
+          if (-not (Test-Path "$app\data\settings.json")) { throw "data not portable" }
+          if (-not (Test-Path "$app\ROX-AI Vault\00 Dashboard.md")) { throw "vault not portable" }
+          $n = (Get-ChildItem "$app\ROX-AI Vault\02 Games").Count
           Write-Host "$n game notes"; if ($n -lt 5) { throw "too few game notes" }
-          schtasks /Query /TN "ROX-AI\Daily Chart Scan"
-          schtasks /Query /TN "ROX-AI\Weekly Playtests"
-          Get-Content "$env:APPDATA\Claude\claude_desktop_config.json"
-          if (-not (Test-Path "$env:LOCALAPPDATA\ROX-AI\roxai.ico")) { throw "icon missing" }
-      - name: MCP handshake against the installed exe
+          if (Test-Path "$env:LOCALAPPDATA\ROX-AI\settings.json") { throw "wrote outside the portable folder" }
+          if (Test-Path "$env:USERPROFILE\Documents\ROX-AI Vault") { throw "wrote a vault into Documents" }
+          $cfg = Get-Content "$env:APPDATA\Claude\claude_desktop_config.json" -Raw
+          $cfg
+          if ($cfg -notmatch [regex]::Escape(($app -replace '\\','\\'))) { throw "Claude Desktop not pointed at the portable exe" }
+          schtasks /Query /TN "ROX-AI\Daily Chart Scan" /V /FO LIST | Select-String "Task To Run"
+          schtasks /Query /TN "ROX-AI\Weekly Playtests" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "schedule missing" }
+      - name: MCP handshake against the portable exe
         shell: pwsh
         run: |
-          $exe = "$env:LOCALAPPDATA\ROX-AI\bin\roxai.exe"
           $in = @(
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}',
             '{"jsonrpc":"2.0","method":"notifications/initialized"}',
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
-            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"system_check","arguments":{}}}'
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
           ) -join "`n"
-          $out = $in | & $exe mcp
-          $out
+          $out = $in | & "user\ROX-AI\roxai.exe" mcp
           if (-not ($out -match '"serverInfo"')) { throw "no initialize response" }
           if (-not ($out -match 'playtest_start')) { throw "tools missing" }
-      - name: Version + update check against GitHub
+      - name: Version + update check
         shell: pwsh
         run: |
-          $exe = "$env:LOCALAPPDATA\ROX-AI\bin\roxai.exe"
-          $v = & $exe --version
+          $v = & "user\ROX-AI\roxai.exe" --version
           $v
           if ($v -notmatch "2\.0\.${{ github.run_number }}") { throw "version not stamped" }
-          & $exe update --check
+          & "user\ROX-AI\roxai.exe" update --check
+      - name: Remove from this PC
+        shell: pwsh
+        run: |
+          & "user\ROX-AI\roxai.exe" remove
+          schtasks /Query /TN "ROX-AI\Daily Chart Scan" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "schedule still there" }
+          if ((Get-Content "$env:APPDATA\Claude\claude_desktop_config.json" -Raw) -match '"roxai"') { throw "Claude Desktop still connected" }
 
   release:
-    needs: [installer, linux]
+    needs: [portable, linux]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -128,5 +136,5 @@ jobs:
           make_latest: "true"
           files: ROX-AI-windows-x64.zip
           body: |
-            **Download `ROX-AI-windows-x64.zip`, unzip it, double-click `INSTALL.bat`.**
-            Built from ${{ github.sha }} (branch ${{ github.ref_name }}). Tested on Windows: unit/integration tests, Win32 self-test, full installer run and MCP handshake.
+            **Download `ROX-AI-windows-x64.zip`, unzip it anywhere, double-click `ROX-AI.exe`.** Portable: nothing is installed.
+            Built from ${{ github.sha }} (branch ${{ github.ref_name }}). Tested on Windows: unit/integration tests, Win32 self-test, portable first start, MCP handshake, removal.

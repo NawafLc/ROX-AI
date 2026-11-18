@@ -10,18 +10,17 @@ ROX-AI is written in **Rust**: one small, fast, self-contained `roxai.exe` (no P
 
 ---
 
-## Install (one time, ~10 minutes, almost all automatic)
+## Get started (portable — nothing is installed)
 
-1. Download **`ROX-AI-windows-x64.zip`** from the latest **Release** (right side of the GitHub page) and unzip it anywhere.
-   (Downloading the source ZIP also works: the installer then fetches the latest release, or builds it for you.)
-2. Double-click **`INSTALL.bat`**.
-3. It installs and sets up everything by itself: ROX-AI, Obsidian, Roblox, Claude Desktop, Claude Code,
-   the vault, the Claude connection, the schedule, a desktop shortcut, and the first chart scan.
-4. At the end it asks you for the only two things it can't do for you:
-   - **Roblox:** log in with an **alt account** (never your main) and press Play on any game once.
-   - **Claude:** log in when the `claude` window opens (then type `/exit`), and sign in to Claude Desktop once.
+1. Download **`ROX-AI-windows-x64.zip`** from the latest **Release** (right side of the GitHub page).
+2. Unzip it anywhere (Desktop, Documents, a USB stick…).
+3. Double-click **`ROX-AI.exe`**.
 
-That's it. Re-running `INSTALL.bat` at any time repairs or updates everything.
+The app checks what's already on your PC (Obsidian, Roblox, Claude Code, Claude Desktop) and shows a one-click
+**Install** or **Sign in** button only for what's missing. No console windows, no installer.
+Everything ROX-AI creates — settings, history and your Obsidian vault — stays **inside that folder**.
+The only things it registers on the PC are the Claude connection and (if "Run automatically" is on) two scheduled
+tasks; **More → Remove from this PC** undoes both, then you just delete the folder.
 
 ## What happens automatically
 
@@ -78,18 +77,16 @@ The `roxai` tools show up in Claude Desktop. Just ask:
   and catch up after the PC was off.
 - **Use an alt account.** Automated play is against Roblox's Terms of Use and can get an account banned.
 
-## Control panel
+## The app
 
-Desktop shortcut **ROX-AI** opens the panel, with live status, system health, the queue and buttons:
-Open Vault · Scan now · Run playtests now · STOP · I fixed the login · Repair setup · Logs · Settings · **⬆️ Update**.
-
-**Updating:** the panel checks GitHub when it opens; when a new release exists the button turns green (*Update to vX*).
-One click downloads it, runs the installer in update mode and reopens ROX-AI. Settings, vault and history are kept.
-Same from a terminal: `roxai update` (or `roxai update --check`).
+One window: a status card (what ROX-AI is doing right now, with a **Stop** button while it plays), a short setup
+checklist that only lists what's missing, two big buttons — **Open my vault** and **Play the top games now** — and one
+switch, **Run automatically**. A yellow **Update to vX** button appears when a new version is released (one click, it
+swaps itself and restarts). Everything else lives under **More**.
 
 ## Settings
 
-`%LOCALAPPDATA%\ROX-AI\settings.json` (or `roxai set <key> <value>`):
+`data\settings.json` in the app folder (More → Settings file, or `roxai set <key> <value>`):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -102,17 +99,15 @@ Same from a terminal: `roxai update` (or `roxai update --check`).
 | `idle_required_minutes` | 3 | PC must be idle this long before playtests start |
 | `kill_hotkey` | ctrl+shift+q | emergency stop |
 | `claude_model` | (your default) | model the autopilot uses |
-| `vault_path` | Documents\ROX-AI Vault | where the vault lives |
+| `vault_path` | (empty = `ROX-AI Vault` in the app folder) | where the vault lives |
+| `auto_run` | true | daily scan + weekly playtests in the background |
 
-## Command line
+## Command line (optional)
 
+`roxai.exe` (next to `ROX-AI.exe`) does everything the app does, for scripting:
 ```
-roxai scan              # chart scan now
-roxai autopilot --force # weekly playtest run now
-roxai playtest <universeId>
-roxai queue | doctor | stop | unblock | open-vault | settings | set <k> <v>
+roxai scan | autopilot --force | playtest <universeId> | queue | doctor | stop | update | remove | selftest
 ```
-(Installed at `%LOCALAPPDATA%\ROX-AI\bin\roxai.exe` and added to your PATH. `roxai selftest` checks the Windows input/capture/scheduler plumbing.)
 
 ## How it works
 
@@ -128,10 +123,10 @@ Claude Desktop ─────────────────────�
 Source (`src/`): `scan.rs` data pipeline · `vault.rs` templates · `mcp.rs` MCP server (JSON-RPC over stdio) ·
 `session.rs` playtest fail-safes · `win/` Win32 input (SendInput), window control, GDI capture, input hooks, Roblox process
 control · `autopilot.rs` weekly runner · `setup.rs` Windows integration · `panel.rs` desktop app (egui) · `store.rs`
-crash-safe history (locked JSON files). Two binaries: `roxai.exe` (console/CLI/MCP) and `roxaiw.exe` (same program without
+crash-safe history (locked JSON files). Two binaries: `roxai.exe` (console/CLI/MCP) and `ROX-AI.exe` (the app; same program without
 a console window, used by scheduled tasks and the panel).
 
 Build it yourself: `cargo build --release`. CI runs all tests, a live Roblox API scan, the Win32 self-test, the full
-installer and an MCP handshake on Windows, then publishes the release ZIP.
+portable first start, an MCP handshake and removal on Windows, then publishes the release ZIP.
 
-Uninstall: `UNINSTALL.bat` (your vault and history are kept).
+Remove: in the app, **More → Remove from this PC**, then delete the folder.

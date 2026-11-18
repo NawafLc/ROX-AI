@@ -7,11 +7,11 @@
 use crate::api::RobloxApi;
 use crate::autopilot::{find_claude, mcp_entry};
 use crate::config::{home_dir, Ctx};
-use crate::util::{atomic_write, hidden_command, run_capture};
+use crate::util::{atomic_write, run_capture};
 use crate::vault::Vault;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const TASK_FOLDER: &str = "ROX-AI";
@@ -80,6 +80,10 @@ pub fn register_claude_desktop(ctx: &Ctx) -> Vec<String> {
             .or_insert(json!({}));
         if !servers.is_object() {
             *servers = json!({});
+        }
+        if servers.get("roxai") == Some(&mcp_entry(ctx)) {
+            done.push(p.to_string_lossy().into_owned());
+            continue;
         }
         servers
             .as_object_mut()
@@ -366,71 +370,6 @@ pub fn icon_image(size: u32) -> image::RgbaImage {
     img
 }
 
-fn shortcut(
-    lnk: &std::path::Path,
-    target: &str,
-    args: &str,
-    icon: &str,
-    cwd: &str,
-    desc: &str,
-) -> bool {
-    let q = |s: &str| s.replace('\'', "''");
-    let ps = format!("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}');$s.TargetPath='{}';$s.Arguments='{}';$s.WorkingDirectory='{}';$s.IconLocation='{}';$s.Description='{}';$s.Save()",
-        q(&lnk.to_string_lossy()), q(target), q(args), q(cwd), q(icon), q(desc));
-    run_capture(
-        "powershell",
-        &["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps],
-        Duration::from_secs(60),
-    )
-    .is_ok_and(|(c, _)| c == 0)
-}
-
-pub fn create_shortcuts(ctx: &Ctx) -> Vec<String> {
-    if !cfg!(windows) {
-        return vec![];
-    }
-    let icon = make_icon(ctx)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let desktop = run_capture(
-        "powershell",
-        &[
-            "-NoProfile",
-            "-Command",
-            "[Environment]::GetFolderPath('Desktop')",
-        ],
-        Duration::from_secs(30),
-    )
-    .ok()
-    .map(|(_, o)| PathBuf::from(o.trim()))
-    .filter(|p| p.exists())
-    .unwrap_or_else(|| home_dir().join("Desktop"));
-    let start = env_path("APPDATA")
-        .unwrap_or_default()
-        .join("Microsoft")
-        .join("Windows")
-        .join("Start Menu")
-        .join("Programs");
-    let target = crate::util::bg_exe().to_string_lossy().into_owned();
-    let mut out = vec![];
-    for folder in [desktop, start] {
-        if folder.exists() {
-            let lnk = folder.join("ROX-AI.lnk");
-            if shortcut(
-                &lnk,
-                &target,
-                "panel",
-                &icon,
-                &ctx.home.to_string_lossy(),
-                "ROX-AI control panel",
-            ) {
-                out.push(lnk.to_string_lossy().into_owned());
-            }
-        }
-    }
-    out
-}
-
 // ---------------------------------------------------------- Obsidian ---
 
 pub fn obsidian_exe() -> Option<PathBuf> {
@@ -544,9 +483,7 @@ pub fn open_vault(ctx: &Ctx) -> String {
                 }
             })
             .collect();
-        let _ = hidden_command("cmd")
-            .args(["/c", "start", "", &format!("obsidian://open?path={enc}")])
-            .spawn();
+        crate::util::open_path(&format!("obsidian://open?path={enc}"));
         return "opened in Obsidian".into();
     }
     if let Some(exe) = obsidian_exe() {
@@ -559,26 +496,217 @@ pub fn open_vault(ctx: &Ctx) -> String {
     "Obsidian not found — opened the vault folder in Explorer".into()
 }
 
-pub fn setup_all(ctx: &Ctx, api: &dyn RobloxApi, open_after: bool) -> Value {
+/// Silent setup on every launch (fast when nothing changed). Portable: everything points at the exe's
+/// current folder, so moving the folder just works — paths are refreshed automatically.
+pub fn ensure(ctx: &Ctx, api: Option<&dyn RobloxApi>) -> Value {
+    migrate_legacy(ctx);
+    cleanup_old_exes();
     let v = Vault::new(ctx.vault());
-    let vault = match v.init(Some(api)) {
+    let vault = match v.init(api) {
         Ok(()) => v.root.to_string_lossy().into_owned(),
         Err(e) => format!("failed: {e}"),
     };
-    let res = json!({
-        "vault": vault,
-        "obsidian": if cfg!(windows) { register_obsidian_vault(ctx) } else { "skipped".into() },
-        "claude_desktop": register_claude_desktop(ctx),
-        "claude_code": register_claude_code(ctx),
-        "tasks": create_tasks(ctx),
-        "shortcuts": create_shortcuts(ctx),
-        "icon": make_icon(ctx).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
-    });
-    crate::info!("setup: {res}");
-    if open_after {
-        let _ = open_vault(ctx);
+    let exe = crate::util::console_exe().to_string_lossy().into_owned();
+    let mut res = json!({"vault": vault, "data": ctx.home.to_string_lossy()});
+    if cfg!(windows) {
+        res["obsidian"] = json!(register_obsidian_vault(ctx));
+        res["claude_desktop"] = json!(register_claude_desktop(ctx));
+        // Claude Code registration is slow-ish: only redo it when the exe moved
+        if find_claude(ctx).is_some()
+            && ctx
+                .store
+                .get("claude_code_exe")
+                .and_then(|v| v.as_str().map(String::from))
+                != Some(exe.clone())
+        {
+            let r = register_claude_code(ctx);
+            if r == "registered" {
+                let _ = ctx.store.set("claude_code_exe", json!(exe));
+            }
+            res["claude_code"] = json!(r);
+        }
+        res["auto_run"] = json!(apply_auto_run(ctx));
     }
+    let _ = make_icon(ctx);
     res
+}
+
+/// Scheduled tasks on/off (the only thing ROX-AI registers in Windows, and only when enabled).
+pub fn apply_auto_run(ctx: &Ctx) -> String {
+    if !cfg!(windows) {
+        return "n/a".into();
+    }
+    let exe = crate::util::bg_exe().to_string_lossy().into_owned();
+    if ctx.settings.auto_run {
+        let current = ctx
+            .store
+            .get("tasks_exe")
+            .and_then(|v| v.as_str().map(String::from));
+        if current.as_deref() != Some(exe.as_str())
+            || task_status("Daily Chart Scan").is_none()
+            || task_status("Weekly Playtests").is_none()
+        {
+            let r = create_tasks(ctx);
+            if r.as_object().is_some_and(|o| o.values().all(|v| v == "ok")) {
+                let _ = ctx.store.set("tasks_exe", json!(exe));
+                return "on".into();
+            }
+            return format!("failed: {r}");
+        }
+        "on".into()
+    } else {
+        if ctx.store.get("tasks_exe").is_some() || task_status("Daily Chart Scan").is_some() {
+            remove_tasks();
+            let _ = ctx.store.set("tasks_exe", Value::Null);
+        }
+        "off".into()
+    }
+}
+
+/// "Remove from this PC": undo everything ROX-AI registered. Your folder (app, data, vault) is untouched.
+pub fn remove_from_pc(ctx: &Ctx) -> String {
+    remove_tasks();
+    let _ = ctx.store.set("tasks_exe", Value::Null);
+    let _ = ctx.store.set("claude_code_exe", Value::Null);
+    for p in claude_desktop_config_paths() {
+        if let Some(mut cfg) = std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        {
+            if let Some(m) = cfg.get_mut("mcpServers").and_then(|m| m.as_object_mut()) {
+                if m.remove("roxai").is_some() {
+                    let _ = atomic_write(
+                        &p,
+                        serde_json::to_string_pretty(&cfg)
+                            .unwrap_or_default()
+                            .as_bytes(),
+                    );
+                }
+            }
+        }
+    }
+    if let Some(c) = find_claude(ctx) {
+        let _ = run_capture(
+            &c.to_string_lossy(),
+            &["mcp", "remove", "roxai", "-s", "user"],
+            Duration::from_secs(60),
+        );
+    }
+    let mut s = ctx.settings.clone();
+    s.auto_run = false;
+    let _ = s.save(&ctx.home);
+    "Removed the schedule and Claude connections. Delete the folder to remove ROX-AI completely."
+        .into()
+}
+
+/// Leftovers from an update (Windows can't delete a running exe, so updates rename them).
+pub fn cleanup_old_exes() {
+    let dir = crate::config::app_folder();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().ends_with(".old.exe") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)?.flatten() {
+        let (src, dst) = (e.path(), to.join(e.file_name()));
+        if src.is_dir() {
+            copy_dir(&src, &dst)?;
+        } else if !dst.exists() {
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
+}
+
+/// One-time move from the old *installed* version (%LOCALAPPDATA%\ROX-AI + Documents\ROX-AI Vault):
+/// copies history/settings and the vault into this portable folder, then removes the old install's
+/// shortcuts, PATH entry and program files. Nothing is deleted from your vault.
+pub fn migrate_legacy(ctx: &Ctx) {
+    let Some(old) = crate::config::legacy_home() else {
+        return;
+    };
+    if !cfg!(windows)
+        || old == ctx.home
+        || !old.join("data").join("games.json").exists()
+        || ctx.store.get("legacy_migrated").is_some()
+    {
+        return;
+    }
+    if ctx.store.games().is_empty() {
+        let _ = copy_dir(&old.join("data"), ctx.store.dir());
+        if let Ok(t) = std::fs::read_to_string(old.join("settings.json")) {
+            if let Ok(mut v) = serde_json::from_str::<Value>(&t) {
+                v["vault_path"] = json!(""); // portable vault
+                if let Ok(s) = serde_json::from_value::<crate::config::Settings>(v) {
+                    let _ = s.save(&ctx.home);
+                }
+            }
+        }
+        let old_vault = crate::config::home_dir()
+            .join("Documents")
+            .join("ROX-AI Vault");
+        if old_vault.exists() {
+            let _ = copy_dir(&old_vault, &ctx.vault());
+        }
+    }
+    // remove the old install's footprint (data in the old folder is kept as a backup)
+    for lnk in [
+        crate::config::home_dir().join("Desktop").join("ROX-AI.lnk"),
+        env_path("APPDATA")
+            .unwrap_or_default()
+            .join("Microsoft/Windows/Start Menu/Programs/ROX-AI.lnk"),
+    ] {
+        let _ = std::fs::remove_file(lnk);
+    }
+    let _ = std::fs::remove_dir_all(old.join("bin"));
+    let _ = std::fs::remove_dir_all(old.join("venv"));
+    let _ = std::fs::remove_dir_all(old.join("app"));
+    if let Ok((0, out)) = run_capture(
+        "reg",
+        &["query", "HKCU\\Environment", "/v", "Path"],
+        Duration::from_secs(10),
+    ) {
+        if let Some(line) = out.lines().find(|l| l.trim_start().starts_with("Path")) {
+            let val = line
+                .split("REG_")
+                .nth(1)
+                .and_then(|r| r.split_once("    "))
+                .map(|(_, v)| v.trim().to_string())
+                .unwrap_or_default();
+            let bin = old.join("bin").to_string_lossy().into_owned();
+            if val.to_lowercase().contains(&bin.to_lowercase()) {
+                let new: Vec<&str> = val
+                    .split(';')
+                    .filter(|p| !p.eq_ignore_ascii_case(&bin) && !p.is_empty())
+                    .collect();
+                let _ = run_capture(
+                    "reg",
+                    &[
+                        "add",
+                        "HKCU\\Environment",
+                        "/v",
+                        "Path",
+                        "/t",
+                        "REG_EXPAND_SZ",
+                        "/d",
+                        &new.join(";"),
+                        "/f",
+                    ],
+                    Duration::from_secs(10),
+                );
+            }
+        }
+    }
+    let _ = ctx
+        .store
+        .set("legacy_migrated", json!(crate::util::now_iso()));
+    crate::info!("migrated old installed version into the portable folder");
 }
 
 #[cfg(test)]

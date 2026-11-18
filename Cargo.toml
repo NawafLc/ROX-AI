@@ -4,7 +4,7 @@ version = "2.0.0"
 edition = "2021"
 description = "ROX-AI: Claude-powered Roblox chart analyst & AI playtester that builds an Obsidian vault of game blueprints"
 license = "MIT"
-default-run = "roxai"
+default-run = "ROX-AI"
 
 [lib]
 name = "roxai"
@@ -14,10 +14,11 @@ path = "src/lib.rs"
 name = "roxai"
 path = "src/main.rs"
 
-# Same program without a console window: used by scheduled tasks, shortcuts and the panel.
+# The app you double-click. Same program as `roxai`, but without a console window
+# (also used by scheduled tasks so nothing ever flashes on screen).
 [[bin]]
-name = "roxaiw"
-path = "src/bin/roxaiw.rs"
+name = "ROX-AI"
+path = "src/bin/app.rs"
 
 [dependencies]
 anyhow = "1"
@@ -31,6 +32,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Pure-Rust stack (no C compiler needed): native TLS = SChannel on Windows
 ureq = { version = "2", default-features = false, features = ["json", "native-tls"] }
 native-tls = "0.2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 
 [target.'cfg(windows)'.dependencies]

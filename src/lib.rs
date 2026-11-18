@@ -8,6 +8,7 @@ pub mod api;
 pub mod autopilot;
 pub mod cli;
 pub mod config;
+pub mod deps;
 pub mod doctor;
 pub mod mcp;
 pub mod panel;
