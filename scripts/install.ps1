@@ -1,17 +1,18 @@
 # ROX-AI one-click installer (re-run any time to repair or update).
-# Installs: uv + Python 3.12 (private), ROX-AI, Obsidian, Roblox, Claude Desktop, Claude Code,
-# then registers the MCP server, scheduled tasks, shortcuts, builds the vault and runs the first scan.
+# Gets roxai.exe (bundled, downloaded, or built from source), installs Obsidian, Roblox, Claude Desktop and
+# Claude Code, then registers the MCP server, scheduled tasks and shortcuts, builds the vault and runs the first scan.
 param([switch]$CI)  # -CI: automated test mode (no app installs, no sign-in windows)
 $ErrorActionPreference = "Continue"  # native tools write to stderr; we check exit codes ourselves
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Src     = Split-Path -Parent $PSScriptRoot
-$AppDir  = Join-Path $env:LOCALAPPDATA "ROX-AI"
-$Code    = Join-Path $AppDir "app"
-$Venv    = Join-Path $AppDir "venv"
-$Py      = Join-Path $Venv "Scripts\python.exe"
-$Log     = Join-Path $AppDir "install.log"
-New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+$Src    = Split-Path -Parent $PSScriptRoot
+$AppDir = Join-Path $env:LOCALAPPDATA "ROX-AI"
+$Bin    = Join-Path $AppDir "bin"
+$Exe    = Join-Path $Bin "roxai.exe"
+$ExeW   = Join-Path $Bin "roxaiw.exe"
+$Log    = Join-Path $AppDir "install.log"
+$ReleaseZip = "https://github.com/NawafLc/ROX-AI/releases/latest/download/ROX-AI-windows-x64.zip"
+New-Item -ItemType Directory -Force -Path $Bin | Out-Null
 Start-Transcript -Path $Log -Append | Out-Null
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
@@ -19,7 +20,7 @@ function Ok($t)   { Write-Host "    OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
 function Have($c) { [bool](Get-Command $c -ErrorAction SilentlyContinue) }
 function Refresh-Path {
-  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User") + ";$env:USERPROFILE\.local\bin"
+  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User") + ";$env:USERPROFILE\.local\bin;$env:USERPROFILE\.cargo\bin"
 }
 function Retry([scriptblock]$Block, [int]$Times = 3) {
   for ($i = 1; $i -le $Times; $i++) {
@@ -33,9 +34,7 @@ function Winget-Install($id, $name) {
   if ($listed -match [regex]::Escape($id)) { Ok "$name already installed"; return $true }
   Write-Host "    installing $name ..."
   winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --scope user 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
-  }
+  if ($LASTEXITCODE -ne 0) { winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null }
   if ($LASTEXITCODE -eq 0) { Ok "$name installed"; return $true }
   Warn "$name install via winget returned $LASTEXITCODE"; return $false
 }
@@ -44,32 +43,57 @@ Write-Host ""
 Write-Host "  ROX-AI installer" -ForegroundColor Green
 Write-Host "  Everything is automatic. You'll only be asked to sign in (Roblox alt account + Claude) at the end."
 
-# ---------------------------------------------------------------- 1. uv + python
-Step "Python toolchain (uv)"
-Refresh-Path
-if (-not (Have uv)) {
-  $ok = Retry { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression }
+# ---------------------------------------------------------------- 1. get roxai.exe
+Step "ROX-AI program"
+# stop running copies (e.g. the MCP server inside Claude Desktop) so the files can be replaced
+Get-Process roxai, roxaiw -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+
+$found = $null
+foreach ($cand in @((Join-Path $Src "roxai.exe"), (Join-Path $Src "target\release\roxai.exe"))) {
+  if (Test-Path $cand) { $found = Split-Path -Parent $cand; break }
+}
+if (-not $found -and -not $CI) {
+  Write-Host "    downloading the latest release ..."
+  $zip = Join-Path $env:TEMP "ROX-AI-windows-x64.zip"
+  $dl = Join-Path $env:TEMP "roxai-dl"
+  $okDl = Retry { Invoke-WebRequest $ReleaseZip -OutFile $zip -UseBasicParsing }
+  if ($okDl -and (Test-Path $zip)) {
+    if (Test-Path $dl) { Remove-Item -Recurse -Force $dl }
+    Expand-Archive $zip -DestinationPath $dl -Force
+    $exeFound = Get-ChildItem $dl -Recurse -Filter roxai.exe | Select-Object -First 1
+    if ($exeFound) { $found = $exeFound.DirectoryName }
+  }
+}
+if (-not $found) {
+  Write-Host "    building from source (first time takes ~5-10 minutes) ..."
   Refresh-Path
-  if (-not (Have uv)) { throw "Could not install uv (needed for Python). Check your internet connection and run INSTALL.bat again." }
+  if (-not (Have cargo)) {
+    $ri = Join-Path $env:TEMP "rustup-init.exe"
+    Retry { Invoke-WebRequest "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" -OutFile $ri -UseBasicParsing } | Out-Null
+    # GNU toolchain: self-contained, no Visual Studio needed
+    & $ri -y --profile minimal --default-host x86_64-pc-windows-gnu --default-toolchain stable | Out-Null
+    Refresh-Path
+  }
+  if (-not (Have cargo)) { throw "Could not install Rust to build ROX-AI. Check your internet connection and run INSTALL.bat again." }
+  Push-Location $Src
+  cargo build --release
+  $code = $LASTEXITCODE
+  Pop-Location
+  if ($code -ne 0) { throw "Building ROX-AI failed (see $Log)" }
+  $found = Join-Path $Src "target\release"
 }
-Ok "uv $(uv --version)"
+Copy-Item (Join-Path $found "roxai.exe") $Exe -Force
+if (Test-Path (Join-Path $found "roxaiw.exe")) { Copy-Item (Join-Path $found "roxaiw.exe") $ExeW -Force } else { Copy-Item $Exe $ExeW -Force }
+$ver = & $Exe --version
+if ($LASTEXITCODE -ne 0) { throw "roxai.exe does not run" }
+Ok "$ver installed to $Bin"
 
-# ---------------------------------------------------------------- 2. app copy + venv
-Step "Installing ROX-AI into $AppDir"
-if (Test-Path $Code) { Remove-Item -Recurse -Force $Code }
-New-Item -ItemType Directory -Force -Path $Code | Out-Null
-robocopy $Src $Code /E /XD .git .venv __pycache__ .pytest_cache node_modules /NFL /NDL /NJH /NJS /NP | Out-Null
-if (-not (Test-Path $Py)) {
-  uv venv --python 3.12 $Venv
-  if ($LASTEXITCODE -ne 0) { throw "Could not create the Python environment" }
-}
-$ok = Retry { uv pip install --python $Py --upgrade $Code; if ($LASTEXITCODE -ne 0) { throw "pip failed" } }
-if (-not $ok) { throw "Could not install ROX-AI's Python packages" }
-& $Py -c "import roxai, mcp, mss, PIL, psutil, httpx; print('roxai', roxai.__version__)"
-if ($LASTEXITCODE -ne 0) { throw "ROX-AI import check failed" }
-Ok "ROX-AI installed"
+# add bin to the user PATH (so `roxai` works in any terminal)
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$Bin*") { [Environment]::SetEnvironmentVariable("Path", "$userPath;$Bin", "User") }
 
-# ---------------------------------------------------------------- 3. apps
+# ---------------------------------------------------------------- 2. apps
 if (-not $CI) {
 Step "Obsidian"
 if (-not (Winget-Install "Obsidian.Obsidian" "Obsidian")) {
@@ -77,7 +101,7 @@ if (-not (Winget-Install "Obsidian.Obsidian" "Obsidian")) {
     $rel = Invoke-RestMethod "https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest"
     $asset = $rel.assets | Where-Object { $_.name -match '^Obsidian-[\d\.]+\.exe$' } | Select-Object -First 1
     $f = Join-Path $env:TEMP $asset.name
-    Invoke-WebRequest $asset.browser_download_url -OutFile $f
+    Invoke-WebRequest $asset.browser_download_url -OutFile $f -UseBasicParsing
     Start-Process $f -ArgumentList "/S" -Wait
   } | Out-Null
 }
@@ -85,20 +109,17 @@ if (-not (Winget-Install "Obsidian.Obsidian" "Obsidian")) {
 Step "Roblox Player"
 $robloxFound = (Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions\*\RobloxPlayerBeta.exe","${env:ProgramFiles(x86)}\Roblox\Versions\*\RobloxPlayerBeta.exe" -ErrorAction SilentlyContinue | Select-Object -First 1)
 if ($robloxFound) { Ok "Roblox already installed" }
-else {
-  if (-not (Winget-Install "Roblox.Roblox" "Roblox")) {
-    Retry {
-      $f = Join-Path $env:TEMP "RobloxPlayerInstaller.exe"
-      Invoke-WebRequest "https://www.roblox.com/download/client?os=win" -OutFile $f
-      Start-Process $f -Wait
-    } | Out-Null
-  }
+elseif (-not (Winget-Install "Roblox.Roblox" "Roblox")) {
+  Retry {
+    $f = Join-Path $env:TEMP "RobloxPlayerInstaller.exe"
+    Invoke-WebRequest "https://www.roblox.com/download/client?os=win" -OutFile $f -UseBasicParsing
+    Start-Process $f -Wait
+  } | Out-Null
 }
 
 Step "Claude Desktop"
-$cd = Test-Path "$env:LOCALAPPDATA\AnthropicClaude" -PathType Container
 $cdPkg = Get-ChildItem "$env:LOCALAPPDATA\Packages\Claude_*" -ErrorAction SilentlyContinue
-if ($cd -or $cdPkg) { Ok "Claude Desktop already installed" } else { Winget-Install "Anthropic.Claude" "Claude Desktop" | Out-Null }
+if ((Test-Path "$env:LOCALAPPDATA\AnthropicClaude") -or $cdPkg) { Ok "Claude Desktop already installed" } else { Winget-Install "Anthropic.Claude" "Claude Desktop" | Out-Null }
 
 Step "Claude Code (runs the weekly autopilot with your Claude subscription)"
 Refresh-Path
@@ -107,24 +128,26 @@ if (-not (Have claude)) {
   Refresh-Path
 }
 if (Have claude) { Ok "Claude Code $(claude --version)" } else { Warn "Claude Code not installed - the weekly autopilot needs it (manual playtests from Claude Desktop still work)" }
-
 } # end apps
 
-# ---------------------------------------------------------------- 4. integration
+# ---------------------------------------------------------------- 3. integration
 Step "Vault, Claude registration, scheduled tasks, shortcuts"
-& $Py -m roxai.cli setup
+& $Exe setup
 if ($LASTEXITCODE -ne 0) { Warn "setup reported a problem (see log)" }
 
-Step "First chart scan (1-3 minutes)"
-& $Py -m roxai.cli scan
+Step "First chart scan (about a minute)"
+& $Exe scan
 if ($LASTEXITCODE -ne 0) { Warn "first scan failed - it will retry automatically every day" }
 
 Step "Health check"
-& $Py -m roxai.cli doctor
+& $Exe doctor
+
+# leftovers from the old Python version (settings, vault and history are kept)
+Remove-Item -Recurse -Force (Join-Path $AppDir "venv"), (Join-Path $AppDir "app") -ErrorAction SilentlyContinue
 
 if ($CI) { Write-Host "CI mode: done."; Stop-Transcript | Out-Null; exit 0 }
 
-# ---------------------------------------------------------------- 5. sign-ins (the only manual part)
+# ---------------------------------------------------------------- 4. sign-ins (the only manual part)
 Write-Host ""
 Write-Host "==================================================================" -ForegroundColor Green
 Write-Host "  Almost done - just 2 sign-ins (one time only):" -ForegroundColor Green
@@ -136,15 +159,16 @@ Write-Host ""
 Write-Host "  2) CLAUDE: a window opens running 'claude'. Log in with your" -ForegroundColor White
 Write-Host "     Claude account, then type /exit. Also open Claude Desktop" -ForegroundColor White
 Write-Host "     once and sign in - the 'roxai' tools will be there." -ForegroundColor White
+Write-Host "     (If Claude Desktop was already open, restart it once.)" -ForegroundColor White
 Write-Host "==================================================================" -ForegroundColor Green
 Start-Process "https://www.roblox.com/login"
 if (Have claude) {
   Start-Process powershell -ArgumentList "-NoExit","-Command","Write-Host 'Log in to Claude Code, then type /exit' -ForegroundColor Green; claude"
 }
 
-# ---------------------------------------------------------------- 6. open
-& $Py -m roxai.cli open-vault
-Start-Process (Join-Path $Venv "Scripts\pythonw.exe") -ArgumentList "-m","roxai.panel" -WorkingDirectory $AppDir
+# ---------------------------------------------------------------- 5. open
+& $Exe open-vault
+Start-Process $ExeW -ArgumentList "panel" -WorkingDirectory $AppDir
 Write-Host ""
 Write-Host "ROX-AI is installed. Desktop shortcut: 'ROX-AI'." -ForegroundColor Green
 Write-Host "Charts are scanned daily; Claude playtests the top games weekly when your PC is idle." -ForegroundColor Green

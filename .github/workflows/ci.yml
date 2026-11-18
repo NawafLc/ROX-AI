@@ -7,52 +7,116 @@ on:
   schedule:
     - cron: "37 6 * * 1"   # weekly: catches Roblox API changes early
 
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - name: Install
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test
+      - name: Live Roblox scan (real API)
         run: |
-          uv venv --python 3.12 .venv
-          uv pip install --python .venv -e ".[dev]"
-      - name: Unit tests
-        run: uv run --python .venv pytest -q
-      - name: Live Roblox API check
-        run: uv run --python .venv python -c "from roxai import roblox_api as R; c=R.get_chart('top-trending', 5); assert c, 'empty chart'; d=R.game_details(c[0].universe_id); print(c[0].name, d.visits, len(d.game_passes), len(d.dev_products)); assert d.name"
-      - name: Windows smoke test (real Win32 input/capture/scheduler)
-        if: runner.os == 'Windows'
-        run: uv run --python .venv python tests/win_smoke.py
-      - name: Upload capture
-        if: runner.os == 'Windows' && always()
-        uses: actions/upload-artifact@v4
+          mkdir -p "$RUNNER_TEMP/rx"
+          echo "{\"vault_path\":\"$RUNNER_TEMP/rx/vault\",\"chart_limit\":5}" > "$RUNNER_TEMP/rx/settings.json"
+          ROXAI_HOME="$RUNNER_TEMP/rx" cargo run --quiet -- scan
+          ls "$RUNNER_TEMP/rx/vault/02 Games"
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test
+      - name: Build release
+        run: cargo build --release
+      - name: Self-test (real Win32 input, capture, hooks, scheduler)
+        run: .\target\release\roxai.exe selftest
+      - name: Package
+        shell: pwsh
+        run: |
+          $d = "dist\ROX-AI"
+          New-Item -ItemType Directory -Force -Path "$d\scripts" | Out-Null
+          Copy-Item target\release\roxai.exe, target\release\roxaiw.exe, INSTALL.bat, UNINSTALL.bat, README.md $d
+          Copy-Item scripts\*.ps1 "$d\scripts"
+          Compress-Archive -Path $d -DestinationPath dist\ROX-AI-windows-x64.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ROX-AI-windows-x64
+          path: dist/ROX-AI-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: win-capture
           path: ${{ runner.temp }}/roxai-capture.jpg
           if-no-files-found: ignore
 
   installer:
+    needs: windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ROX-AI-windows-x64
+      - name: Unzip like a user would
+        shell: pwsh
+        run: Expand-Archive ROX-AI-windows-x64.zip -DestinationPath user
       - name: Run INSTALL (CI mode)
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -CI
+          powershell -NoProfile -ExecutionPolicy Bypass -File user\ROX-AI\scripts\install.ps1 -CI
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Verify install
         shell: pwsh
         run: |
-          $py = "$env:LOCALAPPDATA\ROX-AI\venv\Scripts\python.exe"
-          & $py -m roxai.cli doctor
-          & $py -m roxai.cli queue
+          $exe = "$env:LOCALAPPDATA\ROX-AI\bin\roxai.exe"
+          & $exe queue
           if (-not (Test-Path "$env:USERPROFILE\Documents\ROX-AI Vault\00 Dashboard.md")) { throw "vault missing" }
-          Get-ChildItem "$env:USERPROFILE\Documents\ROX-AI Vault\02 Games" | Select-Object -First 5
+          $n = (Get-ChildItem "$env:USERPROFILE\Documents\ROX-AI Vault\02 Games").Count
+          Write-Host "$n game notes"; if ($n -lt 5) { throw "too few game notes" }
           schtasks /Query /TN "ROX-AI\Daily Chart Scan"
           schtasks /Query /TN "ROX-AI\Weekly Playtests"
           Get-Content "$env:APPDATA\Claude\claude_desktop_config.json"
+          if (-not (Test-Path "$env:LOCALAPPDATA\ROX-AI\roxai.ico")) { throw "icon missing" }
+      - name: MCP handshake against the installed exe
+        shell: pwsh
+        run: |
+          $exe = "$env:LOCALAPPDATA\ROX-AI\bin\roxai.exe"
+          $in = @(
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}',
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"system_check","arguments":{}}}'
+          ) -join "`n"
+          $out = $in | & $exe mcp
+          $out
+          if (-not ($out -match '"serverInfo"')) { throw "no initialize response" }
+          if (-not ($out -match 'playtest_start')) { throw "tools missing" }
+
+  release:
+    needs: [installer, linux]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ROX-AI-windows-x64
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0.${{ github.run_number }}
+          name: ROX-AI v2.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: "true"
+          files: ROX-AI-windows-x64.zip
+          body: |
+            **Download `ROX-AI-windows-x64.zip`, unzip it, double-click `INSTALL.bat`.**
+            Built from ${{ github.sha }} (branch ${{ github.ref_name }}). Tested on Windows: unit/integration tests, Win32 self-test, full installer run and MCP handshake.

@@ -1,10 +1,11 @@
-# Removes ROX-AI's scheduled tasks, shortcuts and MCP registrations. Your vault and data are kept.
+# Removes ROX-AI's scheduled tasks, shortcuts, MCP registrations and program files. Your vault and history are kept.
 $AppDir = Join-Path $env:LOCALAPPDATA "ROX-AI"
-$Py = Join-Path $AppDir "venv\Scripts\python.exe"
+$Exe = Join-Path $AppDir "bin\roxai.exe"
 
-if (Test-Path $Py) { & $Py -m roxai.cli stop 2>$null; & $Py -m roxai.cli remove-tasks 2>$null }
+if (Test-Path $Exe) { & $Exe stop 2>$null; & $Exe remove-tasks 2>$null }
 schtasks /Delete /TN "ROX-AI\Daily Chart Scan" /F 2>$null | Out-Null
 schtasks /Delete /TN "ROX-AI\Weekly Playtests" /F 2>$null | Out-Null
+Get-Process roxai, roxaiw -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 $desktop = [Environment]::GetFolderPath('Desktop')
 Remove-Item (Join-Path $desktop "ROX-AI.lnk") -ErrorAction SilentlyContinue
@@ -21,5 +22,8 @@ foreach ($c in $cfgs) {
 }
 if (Get-Command claude -ErrorAction SilentlyContinue) { claude mcp remove roxai -s user 2>$null | Out-Null }
 
-Remove-Item -Recurse -Force (Join-Path $AppDir "venv"), (Join-Path $AppDir "app") -ErrorAction SilentlyContinue
+$Bin = Join-Path $AppDir "bin"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -like "*$Bin*") { [Environment]::SetEnvironmentVariable("Path", (($userPath -split ';') | Where-Object { $_ -ne $Bin }) -join ';', "User") }
+Remove-Item -Recurse -Force $Bin, (Join-Path $AppDir "venv"), (Join-Path $AppDir "app") -ErrorAction SilentlyContinue
 Write-Host "ROX-AI removed. Your vault (Documents\ROX-AI Vault) and history ($AppDir) were kept." -ForegroundColor Green

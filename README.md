@@ -6,14 +6,16 @@ a detailed **Obsidian vault** with one **template / blueprint note per game**: c
 progression, UI, monetization (with real prices), retention, content angles and a Roblox Studio build plan.
 
 Claude is plugged in as an **MCP server**, so it runs on your existing Claude subscription. No API key needed.
+ROX-AI is written in **Rust**: one small, fast, self-contained `roxai.exe` (no Python or other runtime needed).
 
 ---
 
 ## Install (one time, ~10 minutes, almost all automatic)
 
-1. Download this repo (green **Code** button → **Download ZIP**) and unzip it anywhere.
+1. Download **`ROX-AI-windows-x64.zip`** from the latest **Release** (right side of the GitHub page) and unzip it anywhere.
+   (Downloading the source ZIP also works: the installer then fetches the latest release, or builds it for you.)
 2. Double-click **`INSTALL.bat`**.
-3. It installs and sets up everything by itself: Python, ROX-AI, Obsidian, Roblox, Claude Desktop, Claude Code,
+3. It installs and sets up everything by itself: ROX-AI, Obsidian, Roblox, Claude Desktop, Claude Code,
    the vault, the Claude connection, the schedule, a desktop shortcut, and the first chart scan.
 4. At the end it asks you for the only two things it can't do for you:
    - **Roblox:** log in with an **alt account** (never your main) and press Play on any game once.
@@ -106,7 +108,7 @@ roxai autopilot --force # weekly playtest run now
 roxai playtest <universeId>
 roxai queue | doctor | stop | unblock | open-vault | settings | set <k> <v>
 ```
-(Installed at `%LOCALAPPDATA%\ROX-AI\venv\Scripts\roxai.exe`.)
+(Installed at `%LOCALAPPDATA%\ROX-AI\bin\roxai.exe` and added to your PATH. `roxai selftest` checks the Windows input/capture/scheduler plumbing.)
 
 ## How it works
 
@@ -119,9 +121,13 @@ Task Scheduler ─┬─ daily ──► roxai scan ──► Roblox web APIs �
 Claude Desktop ─────────────────────► same roxai MCP server (manual use)
 ```
 
-Files: `src/roxai/` (`scan.py` data pipeline · `vault.py` templates · `mcp_server.py` tools · `session.py` playtest
-fail-safes · `winctl/` Win32 input/capture/window/hooks · `autopilot.py` weekly runner · `setup.py` Windows integration ·
-`panel.py` desktop app). CI runs the unit tests, a live Roblox API check, real Win32 smoke tests and the full installer on
-Windows.
+Source (`src/`): `scan.rs` data pipeline · `vault.rs` templates · `mcp.rs` MCP server (JSON-RPC over stdio) ·
+`session.rs` playtest fail-safes · `win/` Win32 input (SendInput), window control, GDI capture, input hooks, Roblox process
+control · `autopilot.rs` weekly runner · `setup.rs` Windows integration · `panel.rs` desktop app (egui) · `store.rs`
+crash-safe history (locked JSON files). Two binaries: `roxai.exe` (console/CLI/MCP) and `roxaiw.exe` (same program without
+a console window, used by scheduled tasks and the panel).
+
+Build it yourself: `cargo build --release`. CI runs all tests, a live Roblox API scan, the Win32 self-test, the full
+installer and an MCP handshake on Windows, then publishes the release ZIP.
 
 Uninstall: `UNINSTALL.bat` (your vault and history are kept).
