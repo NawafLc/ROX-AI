@@ -152,7 +152,7 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
         }
         Cmd::Panel => crate::panel::run(ctx.clone())?,
         Cmd::Mcp => crate::mcp::serve(ctx.clone())?,
-        Cmd::OpenVault => crate::setup::open_vault(ctx),
+        Cmd::OpenVault => print(crate::setup::open_vault(ctx)),
         Cmd::RemoveTasks => crate::setup::remove_tasks(),
         Cmd::Set { key, value } => {
             ctx.settings.set_from_str(&key, &value)?;

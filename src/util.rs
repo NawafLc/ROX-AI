@@ -150,10 +150,7 @@ pub fn is_locked(state_dir: &Path, name: &str) -> bool {
         return false;
     }
     match OpenOptions::new().read(true).write(true).open(&path) {
-        Ok(f) => {
-            
-            f.try_lock().is_err()
-        }
+        Ok(f) => f.try_lock().is_err(),
         Err(_) => false,
     }
 }

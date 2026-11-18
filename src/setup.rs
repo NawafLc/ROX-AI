@@ -434,13 +434,45 @@ pub fn create_shortcuts(ctx: &Ctx) -> Vec<String> {
 // ---------------------------------------------------------- Obsidian ---
 
 pub fn obsidian_exe() -> Option<PathBuf> {
-    [
-        env_path("LOCALAPPDATA").map(|l| l.join("Programs").join("Obsidian").join("Obsidian.exe")),
+    let la = env_path("LOCALAPPDATA");
+    let mut cands: Vec<PathBuf> = [
+        la.as_ref()
+            .map(|l| l.join("Programs").join("Obsidian").join("Obsidian.exe")),
+        la.as_ref().map(|l| l.join("Obsidian").join("Obsidian.exe")),
         env_path("ProgramFiles").map(|p| p.join("Obsidian").join("Obsidian.exe")),
+        env_path("ProgramFiles(x86)").map(|p| p.join("Obsidian").join("Obsidian.exe")),
     ]
     .into_iter()
     .flatten()
-    .find(|p| p.exists())
+    .collect();
+    // winget / custom installs: ask the uninstall registry where it went
+    if cfg!(windows) {
+        for root in ["HKCU", "HKLM"] {
+            let key = format!("{root}\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall");
+            if let Ok((0, out)) = run_capture(
+                "reg",
+                &["query", &key, "/s", "/f", "Obsidian.exe", "/d"],
+                Duration::from_secs(20),
+            ) {
+                let rx = regex::Regex::new(r#"(?i)([a-z]:\\[^"\r\n]*?obsidian\.exe)"#).unwrap();
+                for c in rx.captures_iter(&out) {
+                    cands.push(PathBuf::from(&c[1]));
+                }
+            }
+        }
+    }
+    cands.into_iter().find(|p| p.is_file())
+}
+
+/// Obsidian registers the obsidian:// link only after it has been opened once.
+pub fn obsidian_protocol_registered() -> bool {
+    cfg!(windows)
+        && ["HKCU\\Software\\Classes\\obsidian", "HKCR\\obsidian"]
+            .iter()
+            .any(|k| {
+                run_capture("reg", &["query", k], Duration::from_secs(10))
+                    .is_ok_and(|(c, _)| c == 0)
+            })
 }
 
 pub fn register_obsidian_vault(ctx: &Ctx) -> String {
@@ -492,25 +524,39 @@ pub fn register_obsidian_vault(ctx: &Ctx) -> String {
     }
 }
 
-pub fn open_vault(ctx: &Ctx) {
+/// Open the vault in Obsidian, whatever state Obsidian is in. Never shows an error dialog:
+///   link works → use it · Obsidian installed but never opened → register vault + start Obsidian
+///   Obsidian missing → open the folder in Explorer.
+pub fn open_vault(ctx: &Ctx) -> String {
     let path = ctx.vault().to_string_lossy().into_owned();
-    let enc: String = path
-        .bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect();
-    if cfg!(windows) && obsidian_exe().is_some() {
+    if !cfg!(windows) {
+        crate::util::open_path(&path);
+        return "opened folder".into();
+    }
+    if obsidian_protocol_registered() {
+        let enc: String = path
+            .bytes()
+            .map(|b| {
+                if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+                    (b as char).to_string()
+                } else {
+                    format!("%{b:02X}")
+                }
+            })
+            .collect();
         let _ = hidden_command("cmd")
             .args(["/c", "start", "", &format!("obsidian://open?path={enc}")])
             .spawn();
-    } else {
-        crate::util::open_path(&path);
+        return "opened in Obsidian".into();
     }
+    if let Some(exe) = obsidian_exe() {
+        // first launch: our vault is pre-registered (marked open), so Obsidian opens straight into it
+        let reg = register_obsidian_vault(ctx);
+        let _ = std::process::Command::new(&exe).spawn();
+        return format!("started Obsidian ({reg})");
+    }
+    crate::util::open_path(&path);
+    "Obsidian not found — opened the vault folder in Explorer".into()
 }
 
 pub fn setup_all(ctx: &Ctx, api: &dyn RobloxApi, open_after: bool) -> Value {
@@ -530,7 +576,7 @@ pub fn setup_all(ctx: &Ctx, api: &dyn RobloxApi, open_after: bool) -> Value {
     });
     crate::info!("setup: {res}");
     if open_after {
-        open_vault(ctx);
+        let _ = open_vault(ctx);
     }
     res
 }

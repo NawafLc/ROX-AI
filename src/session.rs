@@ -169,13 +169,7 @@ impl Manager {
         if pid != 0 && pid != std::process::id() && crate::util::pid_exists(pid) {
             return; // still running in another process
         }
-        if pid == std::process::id()
-            && self
-                .cur
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|s| !s.ended)
+        if pid == std::process::id() && self.cur.lock().unwrap().as_ref().is_some_and(|s| !s.ended)
         {
             return;
         }

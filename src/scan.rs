@@ -362,9 +362,9 @@ fn process_game(
     let hist = ctx.store.history(e.universe_id, &s.sort_id, 60);
     let tr = A::trend(&hist);
     let row = ctx.store.game(e.universe_id);
-    let refresh = row.as_ref().is_some_and(|g| {
-        days_since(&g.last_seen).is_some_and(|x| x > 7.0)
-    });
+    let refresh = row
+        .as_ref()
+        .is_some_and(|g| days_since(&g.last_seen).is_some_and(|x| x > 7.0));
     let icon = ensure_icon(v, api, e.universe_id, &d.icon_url, refresh);
     let pts = ctx.store.playtests_for(e.universe_id, 10);
     let path = v.update_game_note(
