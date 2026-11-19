@@ -86,6 +86,17 @@ pub enum Cmd {
     },
     /// Learn one game now from YouTube videos (via Claude Code)
     Learn { universe_id: u64 },
+    /// Serve the app's interface + API on localhost (previews, and later the iPhone app)
+    #[command(hide = true)]
+    UiServer {
+        #[arg(long, default_value_t = 7777)]
+        port: u16,
+        #[arg(long)]
+        dist: Option<std::path::PathBuf>,
+    },
+    /// Write the app icon files (used when building)
+    #[command(hide = true)]
+    MakeIcons { dir: std::path::PathBuf },
     /// Windows self-test of input, capture, hooks and scheduler (used by CI)
     Selftest,
 }
@@ -174,7 +185,28 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
             crate::win::roblox::kill_all();
             print("Stop requested; Roblox closed.");
         }
-        Cmd::Panel => crate::panel::run(ctx.clone())?,
+        Cmd::Panel => {
+            let app = crate::util::bg_exe();
+            if app == std::env::current_exe().unwrap_or_default() {
+                print("Start the app with ROX-AI.exe");
+            } else {
+                std::process::Command::new(app).spawn()?;
+            }
+        }
+        Cmd::UiServer { port, dist } => {
+            let dist = dist.unwrap_or_else(|| crate::config::app_folder().join("ui"));
+            crate::ui_api::serve(port, dist)?
+        }
+        Cmd::MakeIcons { dir } => {
+            std::fs::create_dir_all(&dir)?;
+            for (name, size) in [("32x32.png", 32u32), ("128x128.png", 128), ("128x128@2x.png", 256), ("icon.png", 512)] {
+                crate::setup::icon_image(size).save(dir.join(name))?;
+            }
+            let ctx2 = crate::config::Ctx::at(std::env::temp_dir().join("roxai-icon"));
+            let _ = std::fs::remove_file(ctx2.home.join("roxai.ico"));
+            std::fs::copy(crate::setup::make_icon(&ctx2)?, dir.join("icon.ico"))?;
+            print("icons written");
+        }
         Cmd::Mcp => crate::mcp::serve(ctx.clone())?,
         Cmd::OpenVault => print(crate::setup::open_vault(ctx)),
         Cmd::RemoveTasks => crate::setup::remove_tasks(),

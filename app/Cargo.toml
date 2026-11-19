@@ -1,0 +1,24 @@
+[package]
+name = "rox-ai-app"
+version = "2.0.0"
+edition = "2021"
+description = "ROX-AI desktop app (Tauri shell around the roxai engine)"
+publish = false
+
+[[bin]]
+name = "ROX-AI"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+roxai = { path = ".." }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde_json = "1"
+
+[features]
+# embed the built interface (ui/dist) into the exe
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

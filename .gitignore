@@ -7,3 +7,4 @@ build/
 *.egg-info/
 .roxai-test/
 target/
+app/gen/

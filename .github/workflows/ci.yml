@@ -20,8 +20,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Interface builds (type-check + bundle)
+        working-directory: ui
+        run: npm ci && npm run build
       - name: Tests
-        run: cargo test
+        run: cargo test -p roxai
+      - name: Interface server answers with real data
+        run: |
+          mkdir -p "$RUNNER_TEMP/ux"
+          ROXAI_HOME="$RUNNER_TEMP/ux" cargo run --quiet -- ui-server --port 7799 --dist ui/dist &
+          for i in $(seq 1 60); do curl -sf -XPOST localhost:7799/api/status && break; sleep 2; done
+          curl -sf localhost:7799/ | grep -q '<div id="root">'
+          curl -sf -XPOST localhost:7799/api/deps | grep -q claude_code
       - name: Live Roblox scan (real API)
         run: |
           mkdir -p "$RUNNER_TEMP/rx"
@@ -32,15 +45,21 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      ROXAI_VERSION: 2.0.${{ github.run_number }}   # baked into the exe; the Update button compares it with GitHub
+      ROXAI_VERSION: 2.1.${{ github.run_number }}   # baked into the exe; the Update button compares it with GitHub
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build interface
+        working-directory: ui
+        run: npm ci && npm run build
       - name: Tests
-        run: cargo test
-      - name: Build release
-        run: cargo build --release
+        run: cargo test -p roxai
+      - name: Build release (app + command-line helper)
+        run: cargo build --release --workspace
       - name: Self-test (real Win32 input, capture, hooks, scheduler)
         run: .\target\release\roxai.exe selftest
       - name: Package (portable folder)
@@ -110,7 +129,7 @@ jobs:
         run: |
           $v = & "user\ROX-AI\roxai.exe" --version
           $v
-          if ($v -notmatch "2\.0\.${{ github.run_number }}") { throw "version not stamped" }
+          if ($v -notmatch "2\.1\.${{ github.run_number }}") { throw "version not stamped" }
           & "user\ROX-AI\roxai.exe" update --check
       - name: Remove from this PC
         shell: pwsh
@@ -139,6 +158,17 @@ jobs:
           if ($cfg -notmatch 'ROX-AI.exe') { throw "Claude not pointed at the single exe: $cfg" }
           & user\ROX-AI\roxai.exe remove | Out-Null
           exit 0
+      - name: Desktop window opens (Tauri + WebView2) and stays up
+        shell: pwsh
+        run: |
+          $p = Start-Process solo\ROX-AI.exe -PassThru
+          Start-Sleep 15
+          if ($p.HasExited) { throw "app closed right away (exit $($p.ExitCode))" }
+          $w = Get-Process -Id $p.Id
+          Write-Host "window title: $($w.MainWindowTitle)"
+          Stop-Process -Id $p.Id -Force
+          & user\ROX-AI\roxai.exe remove | Out-Null
+          exit 0
 
   release:
     needs: [portable, linux]
@@ -152,8 +182,8 @@ jobs:
         run: unzip -j ROX-AI-windows-x64.zip 'ROX-AI/ROX-AI.exe' -d .
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.${{ github.run_number }}
-          name: ROX-AI v2.0.${{ github.run_number }}
+          tag_name: v2.1.${{ github.run_number }}
+          name: ROX-AI v2.1.${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: "true"
           files: |

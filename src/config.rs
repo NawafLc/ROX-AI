@@ -97,6 +97,8 @@ pub struct Settings {
     pub learn_interval_days: f64,
     pub reanalyze_after_days: f64,
     pub videos_per_game: usize,
+    /// genres / themes / mechanics to never build (comma separated, used by the idea pipeline)
+    pub avoid: String,
 }
 
 impl Default for Settings {
@@ -133,6 +135,7 @@ impl Default for Settings {
             learn_interval_days: 1.0,
             reanalyze_after_days: 30.0,
             videos_per_game: 4,
+            avoid: String::new(),
         }
     }
 }

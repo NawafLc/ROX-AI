@@ -12,17 +12,16 @@ pub mod deps;
 pub mod doctor;
 pub mod gamesview;
 pub mod mcp;
-pub mod panel;
 pub mod relocate;
 pub mod scan;
 pub mod selftest;
 pub mod session;
 pub mod setup;
 pub mod store;
+pub mod ui_api;
 pub mod update;
 pub mod util;
 pub mod vault;
-pub mod vaultview;
 pub mod win;
 pub mod youtube;
 

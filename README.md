@@ -7,16 +7,28 @@ with one detailed **template / blueprint note per game** (core loop, onboarding,
 monetization with real prices, retention, content angles and a Roblox Studio build plan), and you can read it right
 inside the app.
 
-Two modes, switchable any time on the Home tab:
+Two modes, switchable any time on the Studio page:
 
 | Mode | What it does | Needs |
 |---|---|---|
 | **Passive** | Daily chart tracking, trends, store prices, badges: just the data | nothing |
 | **Active** | All of the above, plus Claude learns every new chart game from YouTube videos and writes the full breakdown | Claude Code (your Claude subscription) |
 
-The app has three tabs: **Home** (mode, status, big buttons), **Games** (dashboard of every game and whether it was
-learned from videos or is data only, with a **Learn** button per game) and **Vault** (browse and read every note,
-with clickable links; "Open in Obsidian" when you want).
+The app (version 2.1+, rebuilt with Tauri + React) has a sidebar with:
+
+- **Studio**: what ROX-AI is doing right now (with **Stop**), the Passive/Active switch, stats, the next games to learn
+  and the games learned most recently.
+- **My Games**: where the games your AI team builds will appear, with screenshots, **Play**, **Feedback** and
+  **Publish** (coming in the next milestones, see `docs/PLAN.md`).
+- **Research**: every tracked game with search, filters (learned / from videos / not learned), genre and sortable
+  columns. Click a game for its page: stats, player graph, the videos it learned from, its full vault note and a
+  **Learn now** button.
+- **Market**: today's chart with rank moves, player changes, the hottest games and where players are by genre.
+- **Vault**: browse and read every note inside the app, with working links and callouts; "Open in Obsidian" any time.
+- **Settings**: mode, automatic runs, learning amounts, Claude model, chart, things to avoid, updates, folders and
+  Remove from this PC.
+
+An **Update ready** card appears in the sidebar when a new version is out: one click installs it.
 
 > AI playtesting on the real Roblox client still exists in the code but is **turned off** for now; video learning
 > replaces it.
@@ -27,14 +39,14 @@ with clickable links; "Open in Obsidian" when you want).
 2. Double-click it. A **setup wizard** walks you through everything:
    - **Location**: keep ROX-AI where it is, or move it to a folder of your choice (recommended if it's in
      Downloads), with optional Desktop / Start-menu shortcuts.
-   - **Apps**: shows what you already have (Obsidian, Roblox, Claude Code, Claude Desktop); anything missing installs
-     with one click and a progress bar.
-   - **Accounts**: sign in to your Roblox **alt** and to Claude (each opens your browser, turns green by itself).
-   - **Preferences**: run automatically, games per week, minutes per game.
+   - **Mode**: Passive (data only) or Active (also learns games from YouTube with Claude).
+   - **Connect**: shows what you already have (Claude Code, your Claude account, the video reader, Obsidian, Claude
+     Desktop); anything missing sets itself up with one click and a progress bar. "Set up all" does everything.
+   - **Done**: run automatically in the background, on or off.
 
 ROX-AI is **portable**: settings, history and your Obsidian vault live in its own folder. No installer, no console
 windows. The only things it registers in Windows are the Claude connection and (if "Run automatically" is on) two
-scheduled tasks; **More → Remove from this PC** undoes both, then just delete the folder.
+scheduled tasks; **Settings → Remove from this PC** undoes both, then just delete the folder.
 
 ## What happens automatically
 
@@ -79,7 +91,7 @@ The `roxai` tools show up in Claude Desktop. Just ask:
 ## Safety & fail-safes
 
 - **You are always in charge:** touching your **mouse or keyboard** during a playtest, pressing **Ctrl+Shift+Q**, or
-  the **STOP** button in the ROX-AI panel immediately releases all keys and closes Roblox.
+  the **Stop** button in the ROX-AI app immediately releases all keys and closes Roblox.
 - Playtests only start when the PC is **unlocked and idle**. ROX-AI never takes over while you're using it.
 - Hard **time budget** per game (12 minutes by default) and a watchdog that closes Roblox if anything hangs, crashes or
   overruns.
@@ -92,16 +104,10 @@ The `roxai` tools show up in Claude Desktop. Just ask:
   and catch up after the PC was off.
 - **Use an alt account.** Automated play is against Roblox's Terms of Use and can get an account banned.
 
-## The app
-
-One window: a status card (what ROX-AI is doing right now, with a **Stop** button while it plays), a short setup
-checklist that only lists what's missing, two big buttons — **Open my vault** and **Play the top games now** — and one
-switch, **Run automatically**. A yellow **Update to vX** button appears when a new version is released (one click, it
-swaps itself and restarts). Everything else lives under **More**.
-
 ## Settings
 
-`data\settings.json` in the app folder (More → Settings file, or `roxai set <key> <value>`):
+Most settings are on the app's **Settings** page. All of them live in `data\settings.json` in the app folder (or
+`roxai set <key> <value>`):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -121,6 +127,7 @@ swaps itself and restarts). Everything else lives under **More**.
 | `videos_per_game` | 4 | YouTube videos read per game |
 | `reanalyze_after_days` | 30 | re-learn a game after this long |
 | `playtesting_enabled` | false | AI playtesting on the Roblox client (off) |
+| `avoid` | (empty) | genres or themes your AI team should never make |
 
 ## Command line (optional)
 
@@ -142,11 +149,13 @@ Claude Desktop ─────────────────────�
 
 Source (`src/`): `scan.rs` data pipeline · `vault.rs` templates · `mcp.rs` MCP server (JSON-RPC over stdio) ·
 `session.rs` playtest fail-safes · `win/` Win32 input (SendInput), window control, GDI capture, input hooks, Roblox process
-control · `autopilot.rs` weekly runner · `setup.rs` Windows integration · `panel.rs` desktop app (egui) · `store.rs`
-crash-safe history (locked JSON files). Two binaries: `roxai.exe` (console/CLI/MCP) and `ROX-AI.exe` (the app; same program without
-a console window, used by scheduled tasks and the panel).
+control · `autopilot.rs` runner · `setup.rs` Windows integration · `ui_api.rs` the one API the interface uses ·
+`store.rs` crash-safe history (locked JSON files). The interface is in `ui/` (React + Tailwind) and the desktop
+shell in `app/` (Tauri 2, uses Windows' built-in WebView2). Two binaries: `roxai.exe` (console/CLI/MCP) and
+`ROX-AI.exe` (the app; with arguments it behaves exactly like `roxai.exe`, so the single file is enough).
 
-Build it yourself: `cargo build --release`. CI runs all tests, a live Roblox API scan, the Win32 self-test, the full
+Build it yourself: `cd ui && npm ci && npm run build`, then `cargo build --release --workspace`. To preview the
+interface in a browser: `roxai ui-server --dist ui/dist` and open http://127.0.0.1:7777. CI runs all tests, a live Roblox API scan, the Win32 self-test, the full
 portable first start, an MCP handshake and removal on Windows, then publishes the release ZIP.
 
-Remove: in the app, **More → Remove from this PC**, then delete the folder.
+Remove: in the app, **Settings → Remove from this PC**, then delete the folder.

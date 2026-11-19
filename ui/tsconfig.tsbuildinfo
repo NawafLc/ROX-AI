@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/components/Logo.tsx","./src/components/Markdown.tsx","./src/components/ui.tsx","./src/lib/api.ts","./src/pages/GameDetail.tsx","./src/pages/Market.tsx","./src/pages/MyGames.tsx","./src/pages/Research.tsx","./src/pages/Settings.tsx","./src/pages/Setup.tsx","./src/pages/Studio.tsx","./src/pages/Vault.tsx"],"version":"5.9.3"}
