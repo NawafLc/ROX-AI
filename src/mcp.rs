@@ -7,7 +7,7 @@ use crate::config::Ctx;
 use crate::session::Manager;
 use crate::util::today;
 use crate::vault::{ai_keys, Vault};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, Write};
@@ -216,6 +216,9 @@ impl Server {
     }
 
     fn note_for(&self, uid: u64) -> Result<std::path::PathBuf> {
+        if uid == 0 {
+            bail!("universe_id must be a real game's universe id (find it with charts, vault_search or vault_list)");
+        }
         let v = self.vault();
         if let Some(n) = self.ctx.store.game(uid).and_then(|g| g.note_path) {
             let p = v.abs(&n);
