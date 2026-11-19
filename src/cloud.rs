@@ -171,15 +171,41 @@ fn root_place(universe_id: u64) -> Result<u64> {
 pub fn upload_place(ctx: &Ctx, rbxl: &[u8]) -> Result<u64> {
     let c = connection(ctx).ok_or_else(|| anyhow!("Roblox isn't connected yet"))?;
     let key = api_key(ctx)?;
-    // "Saved" keeps it a draft version: nothing changes for players, the test place stays private.
-    let v: Value = agent()?
-        .post(&format!("{API}/universes/v1/{}/places/{}/versions?versionType=Saved", c.universe_id, c.place_id))
-        .set("x-api-key", &key)
-        .set("Content-Type", "application/octet-stream")
-        .send_bytes(rbxl)
-        .map_err(|e| explain(e, "upload the place"))?
-        .into_json()?;
-    v["versionNumber"].as_u64().ok_or_else(|| anyhow!("Roblox didn't return a version number: {v}"))
+    let a = agent()?;
+    // Roblox answers 409 "server is busy" while the place is open in Studio, and sometimes just briefly:
+    // wait and retry for a few minutes before giving up.
+    let waits = [0u64, 15, 30, 60, 90];
+    for (i, wait) in waits.iter().enumerate() {
+        std::thread::sleep(Duration::from_secs(*wait));
+        // "Saved" keeps it a draft version: nothing changes for players, the test place stays private.
+        let r = a
+            .post(&format!("{API}/universes/v1/{}/places/{}/versions?versionType=Saved", c.universe_id, c.place_id))
+            .set("x-api-key", &key)
+            .set("Content-Type", "application/octet-stream")
+            .send_bytes(rbxl);
+        match r {
+            Ok(resp) => {
+                let v: Value = resp.into_json()?;
+                return v["versionNumber"].as_u64().ok_or_else(|| anyhow!("Roblox didn't return a version number: {v}"));
+            }
+            Err(ureq::Error::Status(code, resp)) if (code == 409 || code >= 500) && i + 1 < waits.len() => {
+                let body: String = resp.into_string().unwrap_or_default().chars().take(200).collect();
+                crate::warn!("Roblox: upload got HTTP {code} ({body}), retrying");
+            }
+            Err(ureq::Error::Status(409, _)) if studio_open() => {
+                bail!("Roblox won't take the upload while the test place is open in Roblox Studio. Close Studio (your team never needs it open), then press Test pipeline again.")
+            }
+            Err(e) => return Err(explain(e, "upload the place")),
+        }
+    }
+    unreachable!()
+}
+
+/// Roblox Studio is running (an open place blocks uploads to it).
+fn studio_open() -> bool {
+    cfg!(windows)
+        && crate::util::run_capture("tasklist", &["/FI", "IMAGENAME eq RobloxStudioBeta.exe", "/NH"], Duration::from_secs(15))
+            .is_ok_and(|(_, out)| out.to_lowercase().contains("robloxstudiobeta"))
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
