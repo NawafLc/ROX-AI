@@ -31,6 +31,13 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   - `playbook.rs` (M1) 11 chapters in `06 Playbook`: 📊 our numbers (computed), 🤖 rules (strong/emerging/opinion
     with evidence), 📚 sources, ✍️ My rules (owner's, always win). Most outdated chapter is rewritten after each
     learning run. Prompt: `src/prompts/playbook.md`. `AGENT_CHAPTERS` maps agents → chapters.
+  - `pipeline.rs` (M2) headless builds: Rojo 7.7.1 + Lune 0.11.1 (pinned) downloaded into `data\tools\`; game
+    projects in `data\games\<slug>\` from the template in `src/template/` (Rojo project: Shared/Server/Client +
+    `tests/*.spec.luau`). `run()` = Rojo build → Lune compiles every script + runs specs (`src/luau/check.luau`) →
+    upload as a **Saved** version to the test place → same specs on Roblox via Luau Execution (`src/luau/remote.luau`).
+    Shared test harness `src/luau/harness.luau`. Report in `<game>\.roxai\last_build.json` + store `pipeline_last`.
+  - `cloud.rs` (M2) Open Cloud: `connect()` checks key + place with a real Luau run; key saved DPAPI-encrypted in
+    `data\secrets\roblox.key` (never in settings, logs or tool output); `upload_place()`, `run_luau()`.
   - `ui_api.rs` the ONE API the interface uses (`call(cmd, json)`): status, home, games, game, chart, playbook,
     vault_tree, note, settings_get/set, start{scan|learn|learn_game|playbook|stop}, update_check/run, deps, …
     Also `roxai ui-server --dist ui/dist` serves the UI + API over HTTP on 127.0.0.1:7777 (previews; later iPhone).
@@ -69,7 +76,15 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
 
 ## Where we are / what's next (see PLAN.md build order)
 - ✅ M0 new UI (Tauri + React). ✅ M1 Playbook.
-- **Next: M2 headless build pipeline** — needs the owner once: (1) a free Open Cloud API key (walk them through
+- **M2 headless build pipeline: built; the local half is verified on the owner's PC** (Rojo + Lune install
+  themselves, the starter game builds, every script compiles, unit tests pass, syntax errors and failing tests are
+  reported). Settings → Game building has the guided Roblox connection (test place + API key) and **Test pipeline**.
+  CLI: `roxai pipeline tools|new|build [--remote]|selftest`, `roxai roblox connect --place <id>` (key on stdin)
+  `|status|disconnect`. CI runs `pipeline selftest` on Linux and Windows. **Waiting on the owner** for the key + test
+  place; Connect then runs the full self-test (upload + Luau Execution) by itself. After that: M3.
+- Dev builds (exe under `target\`) skip Windows registration in `setup::ensure`, so interface previews never take
+  over the real app's schedule or Claude connections (`ROXAI_DEV_REGISTER=1` forces it).
+- Original M2 brief — needs the owner once: (1) a free Open Cloud API key (walk them through
   create.roblox.com → Creator Dashboard → Open Cloud → API keys; permissions for place publishing to a test
   universe and Luau execution; store it only in ROX-AI's data folder, never in the repo or logs) and (2) a private
   test experience/place. On the PC: install Rojo + Lune into ROX-AI's `tools\` (portable), make a project template,

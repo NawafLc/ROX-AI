@@ -134,6 +134,15 @@ pub fn status(ctx: &Ctx) -> Vec<Dep> {
             action: (rb && !rb_login).then_some((Action::SignIn, "Sign in")),
         });
     }
+    let bt = crate::pipeline::tools_ready(ctx);
+    v.push(Dep {
+        id: "build_tools",
+        name: "Game building tools",
+        why: "Rojo and Lune build and check your games without opening Studio (kept inside ROX-AI's folder)",
+        ok: bt,
+        required: false,
+        action: (!bt).then_some((Action::Install, "Install")),
+    });
     v.push(Dep {
         id: "obsidian",
         name: "Obsidian",
@@ -187,7 +196,7 @@ fn winget(id: &str, name: &str, report: Report) -> Result<()> {
     Ok(())
 }
 
-fn agent() -> Result<ureq::Agent> {
+pub(crate) fn agent() -> Result<ureq::Agent> {
     Ok(ureq::AgentBuilder::new()
         .tls_connector(std::sync::Arc::new(native_tls::TlsConnector::new()?))
         .try_proxy_from_env(true)
@@ -197,7 +206,7 @@ fn agent() -> Result<ureq::Agent> {
 }
 
 /// Download with a progress bar into the temp folder.
-fn download(url: &str, file: &str, name: &str, report: Report) -> Result<PathBuf> {
+pub(crate) fn download(url: &str, file: &str, name: &str, report: Report) -> Result<PathBuf> {
     use std::io::{Read, Write};
     report(&format!("Downloading {name}…"), Some(0.0));
     let resp = agent()?
@@ -276,7 +285,7 @@ fn wait_until(check: impl Fn() -> bool, secs: u64) -> bool {
 
 /// Perform an install / sign-in. Blocking (run it on a background thread). Returns a short message.
 pub fn act(ctx: &Ctx, id: &str, action: Action, report: Report) -> Result<String> {
-    if !cfg!(windows) && action == Action::Install && id != "video_reader" {
+    if !cfg!(windows) && action == Action::Install && id != "video_reader" && id != "build_tools" {
         bail!("installing apps is only supported on Windows");
     }
     let wg = action == Action::Install && have_winget();
@@ -334,6 +343,10 @@ pub fn act(ctx: &Ctx, id: &str, action: Action, report: Report) -> Result<String
             }
             let _ = crate::setup::register_claude_desktop(ctx);
             Ok("Claude Desktop is installed — open it once and sign in.".into())
+        }
+        ("build_tools", Action::Install) => {
+            crate::pipeline::install_tools(ctx, report)?;
+            Ok("Game building tools installed (inside ROX-AI's folder).".into())
         }
         ("video_reader", Action::Install) => {
             crate::youtube::install_ytdlp(&ctx.tools_dir(), report)?;

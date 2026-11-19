@@ -48,6 +48,7 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Console",
   "Win32_System_LibraryLoader",
   "Win32_Security",
+  "Win32_Security_Cryptography",
 ] }
 
 [dev-dependencies]

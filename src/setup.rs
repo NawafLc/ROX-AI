@@ -550,7 +550,13 @@ pub fn ensure(ctx: &Ctx, api: Option<&dyn RobloxApi>) -> Value {
     };
     let exe = crate::util::console_exe().to_string_lossy().into_owned();
     let mut res = json!({"vault": vault, "data": ctx.home.to_string_lossy()});
-    if cfg!(windows) {
+    // A development build (cargo's target folder) must never take over the real app's schedule or
+    // Claude connections, e.g. while previewing the interface.
+    let dev_build = exe.to_lowercase().replace('/', "\\").contains("\\target\\") && std::env::var_os("ROXAI_DEV_REGISTER").is_none();
+    if dev_build {
+        res["registration"] = json!("skipped (development build)");
+    }
+    if cfg!(windows) && !dev_build {
         res["obsidian"] = json!(register_obsidian_vault(ctx));
         res["claude_desktop"] = json!(register_claude_desktop(ctx));
         // Claude Code registration is slow-ish: only redo it when the exe moved

@@ -31,6 +31,10 @@ The app (version 2.1+, rebuilt with Tauri + React) has a sidebar with:
   **Learn now** button.
   - **Market**: today's chart with rank moves, player changes, the hottest games and where players are by genre.
   - **Vault**: browse and read every note inside the app, with working links and callouts; "Open in Obsidian" any time.
+- **Settings → Game building**: connect your private Roblox **test place** with a free Open Cloud API key (a guided
+  two-step card; the key stays on this PC, encrypted, and your AI team can never see it), and **Test pipeline**: builds
+  the starter game with **Rojo**, checks every script and runs the unit tests with **Lune**, then uploads it to the test
+  place and runs the same tests on Roblox's servers. Rojo and Lune download themselves into ROX-AI's folder.
 - **Settings**: mode, automatic runs, learning amounts, Claude model, chart, things to avoid, updates, folders and
   Remove from this PC.
 
@@ -143,6 +147,8 @@ Most settings are on the app's **Settings** page. All of them live in `data\sett
 `roxai.exe` (next to `ROX-AI.exe`) does everything the app does, for scripting:
 ```
 roxai scan | autopilot --force | learn <universeId> | playbook [--chapter monetization] [--render] | queue | doctor | stop | update | remove | selftest
+roxai pipeline tools | new "<name>" | build <folder> [--remote] | selftest
+roxai roblox connect --place <Start Place ID>   (then paste the key and press Enter) | status | disconnect
 ```
 
 ## How it works

@@ -111,6 +111,41 @@ pub enum Cmd {
     MakeIcons { dir: std::path::PathBuf },
     /// Windows self-test of input, capture, hooks and scheduler (used by CI)
     Selftest,
+    /// Build and test games: Rojo + Lune on this PC, then the private test place on Roblox
+    #[command(subcommand)]
+    Pipeline(PipelineCmd),
+    /// Connect ROX-AI to Roblox (Open Cloud API key + private test place)
+    #[command(subcommand)]
+    Roblox(RobloxCmd),
+}
+
+#[derive(Subcommand)]
+pub enum PipelineCmd {
+    /// Download Rojo and Lune into ROX-AI's tools folder
+    Tools,
+    /// Start a new game project from the template
+    New { name: String },
+    /// Build a project and run the local checks (add --remote to also test on Roblox)
+    Build {
+        dir: std::path::PathBuf,
+        #[arg(long)]
+        remote: bool,
+    },
+    /// Build + test the starter project end to end (uses the test place if connected)
+    Selftest,
+}
+
+#[derive(Subcommand)]
+pub enum RobloxCmd {
+    /// Save the API key (read from standard input, never from the command line) and the test place
+    Connect {
+        #[arg(long)]
+        place: String,
+    },
+    /// Show the connection
+    Status,
+    /// Forget the API key
+    Disconnect,
 }
 
 fn json_chapters(ctx: &Ctx) -> serde_json::Value {
@@ -272,6 +307,42 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
             }
         }
         Cmd::Selftest => return Ok(crate::selftest::run(ctx)),
+        Cmd::Pipeline(p) => {
+            let report = |t: &str, _f: Option<f32>| eprintln!("... {t}");
+            let rep = match p {
+                PipelineCmd::Tools => {
+                    crate::pipeline::install_tools(ctx, &report)?;
+                    print(pretty(&crate::pipeline::tools_status(ctx)));
+                    return Ok(0);
+                }
+                PipelineCmd::New { name } => {
+                    print(crate::pipeline::new_project(ctx, &name)?.display());
+                    return Ok(0);
+                }
+                PipelineCmd::Build { dir, remote } => crate::pipeline::run(ctx, &dir, remote, &report)?,
+                PipelineCmd::Selftest => crate::pipeline::selftest(ctx, &report)?,
+            };
+            for s in &rep.steps {
+                print(format!("{} {:<24} {}", if s.ok { "OK  " } else { "FAIL" }, s.name, s.detail.replace('\n', "\n      ")));
+            }
+            return Ok(if rep.ok { 0 } else { 1 });
+        }
+        Cmd::Roblox(r) => match r {
+            RobloxCmd::Connect { place } => {
+                let mut key = String::new();
+                std::io::stdin().read_line(&mut key)?;
+                let c = crate::cloud::connect(ctx, &key, &place)?;
+                print(format!("Connected to \"{}\" (place {}, experience {}).", c.place_name, c.place_id, c.universe_id));
+            }
+            RobloxCmd::Status => match crate::cloud::connection(ctx) {
+                Some(c) => print(pretty(&serde_json::to_value(c)?)),
+                None => print("Not connected."),
+            },
+            RobloxCmd::Disconnect => {
+                crate::cloud::disconnect(ctx)?;
+                print("Roblox key removed from this PC.");
+            }
+        },
     }
     Ok(0)
 }

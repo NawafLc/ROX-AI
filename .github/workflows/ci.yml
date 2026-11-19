@@ -35,6 +35,10 @@ jobs:
           for i in $(seq 1 60); do curl -sf -XPOST localhost:7799/api/status && break; sleep 2; done
           curl -sf localhost:7799/ | grep -q '<div id="root">'
           curl -sf -XPOST localhost:7799/api/deps | grep -q claude_code
+      - name: Build pipeline (Rojo builds the starter game, Lune checks scripts + runs unit tests)
+        run: |
+          mkdir -p "$RUNNER_TEMP/pl"
+          ROXAI_HOME="$RUNNER_TEMP/pl" cargo run --quiet -- pipeline selftest
       - name: Live Roblox scan (real API)
         run: |
           mkdir -p "$RUNNER_TEMP/rx"
@@ -64,6 +68,12 @@ jobs:
         run: cargo build --release --workspace
       - name: Self-test (real Win32 input, capture, hooks, scheduler)
         run: .\target\release\roxai.exe selftest
+      - name: Build pipeline on Windows (Rojo + Lune, starter game)
+        shell: pwsh
+        run: |
+          $env:ROXAI_HOME = "$env:RUNNER_TEMP\pl"
+          .\target\release\roxai.exe pipeline selftest
+          if ($LASTEXITCODE -ne 0) { throw "pipeline self-test failed" }
       - name: Package (portable folder)
         shell: pwsh
         run: |

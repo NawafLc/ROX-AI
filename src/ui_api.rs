@@ -230,6 +230,26 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
             }
             json!({"ok": true})
         }
+        "roblox_status" => roblox_status(&c),
+        "roblox_connect" => {
+            let conn = crate::cloud::connect(&c, &s(&a, "key"), &s(&a, "place"))?;
+            // prove the whole pipeline right away: build the starter game, upload it, test it on Roblox
+            if !crate::util::is_locked(&c.state_dir(), "pipeline") {
+                bg(&["pipeline", "selftest"]);
+            }
+            serde_json::to_value(conn)?
+        }
+        "roblox_disconnect" => {
+            crate::cloud::disconnect(&c)?;
+            json!({"ok": true})
+        }
+        "pipeline_test" => {
+            if !crate::util::is_locked(&c.state_dir(), "pipeline") {
+                c.store.set("pipeline_now", json!({"project": "_pipeline-check", "step": "Starting", "since": crate::util::now_iso()}))?;
+                bg(&["pipeline", "selftest"]);
+            }
+            json!({"ok": true})
+        }
         "remove_from_pc" => {
             crate::relocate::remove_shortcuts();
             json!({"message": crate::setup::remove_from_pc(&c)})
@@ -272,6 +292,19 @@ fn enqueue(items: Vec<(String, Action)>) {
             Err(e) => (e.to_string(), false),
         });
     });
+}
+
+/// Settings → Roblox connection: the test place, the build tools and the last pipeline run. Never the key.
+fn roblox_status(c: &Ctx) -> Value {
+    let running = crate::util::is_locked(&c.state_dir(), "pipeline");
+    json!({
+        "connection": crate::cloud::connection(c),
+        "tools": crate::pipeline::tools_status(c),
+        "tools_ready": crate::pipeline::tools_ready(c),
+        "running": running,
+        "now": if running { c.store.get("pipeline_now").unwrap_or(Value::Null) } else { Value::Null },
+        "last": c.store.get("pipeline_last").unwrap_or(Value::Null),
+    })
 }
 
 fn deps_json(c: &Ctx) -> Value {

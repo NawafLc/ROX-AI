@@ -2,6 +2,7 @@ import { Brain, Eye, FolderOpen, Loader2, RefreshCw, RotateCcw, ScrollText, Tras
 import { ReactNode, useEffect, useRef, useState } from 'react'
 import { Status, call, useApi } from '../lib/api'
 import { Button, Card, PageHeader, Switch, cx } from '../components/ui'
+import RobloxConnection from '../components/RobloxConnection'
 
 type S = Record<string, any>
 const CHARTS = [
@@ -100,6 +101,11 @@ export default function SettingsPage({ status, onChange, onCheckUpdates }: { sta
             />
           </div>
         </Section>
+
+        <div id="roblox">
+          <div className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-wider text-mute">Game building</div>
+          <RobloxConnection />
+        </div>
 
         <Section title="App">
           <Row title="Updates" text={status.update.state === 'available' ? `Version ${status.update.latest} is ready to install.` : `You're on version ${status.version}.`}>
