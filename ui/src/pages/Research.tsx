@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { GameRow, Status, ago, fmt, useApi } from '../lib/api'
 import { Card, Empty, GameIcon, MomentumBar, PageHeader, Skeleton, SourceBadge, cx } from '../components/ui'
 import { go } from '../App'
+import { Hero, ModeSwitch } from '../components/Activity'
 
 type SortKey = 'rank' | 'playing' | 'like_ratio' | 'momentum' | 'fun' | 'last_analysis'
 const FILTERS = [
@@ -13,7 +14,7 @@ const FILTERS = [
   { id: 'none', label: 'Not learned' },
 ]
 
-export default function Research({ status }: { status: Status }) {
+export default function Research({ status, onChange }: { status: Status; onChange: () => void }) {
   const { data } = useApi<GameRow[]>('games', {}, 20000)
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
@@ -66,7 +67,11 @@ export default function Research({ status }: { status: Status }) {
       <PageHeader
         title="Research"
         subtitle={`${counts.learned ?? 0} of ${counts.all ?? 0} games learned · ${status.mode === 'active' ? 'learning from YouTube videos' : 'Passive mode: data only'}`}
+      actions={<ModeSwitch mode={status.mode} onChange={onChange} />}
       />
+      <div className="mb-5">
+        <Hero status={status} onChange={onChange} />
+      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative w-72">

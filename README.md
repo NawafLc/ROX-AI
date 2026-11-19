@@ -7,7 +7,7 @@ with one detailed **template / blueprint note per game** (core loop, onboarding,
 monetization with real prices, retention, content angles and a Roblox Studio build plan), and you can read it right
 inside the app.
 
-Two modes, switchable any time on the Studio page:
+Two modes, switchable any time on the Research page or in Settings:
 
 | Mode | What it does | Needs |
 |---|---|---|
@@ -16,19 +16,21 @@ Two modes, switchable any time on the Studio page:
 
 The app (version 2.1+, rebuilt with Tauri + React) has a sidebar with:
 
-- **Studio**: what ROX-AI is doing right now (with **Stop**), the Passive/Active switch, stats, the next games to learn
-  and the games learned most recently.
-- **My Games**: where the games your AI team builds will appear, with screenshots, **Play**, **Feedback** and
-  **Publish** (coming in the next milestones, see `docs/PLAN.md`).
-- **Research**: every tracked game with search, filters (learned / from videos / not learned), genre and sortable
+- **Home** (opens first): your games, what each member of your AI team is doing, and a very short summary of today.
+- **My Games**: every game your team builds, with screenshots, **Play**, **Feedback** and **Publish** (the building
+  parts arrive in the next milestones, see `docs/PLAN.md`).
+- **Team**: each agent with its model and live status; the chat with the Lead goes here.
+- Under **Knowledge**:
+  - **Research**: what ROX-AI is doing right now (with **Stop**), the Passive/Active switch, and every tracked game with search, filters (learned / from videos / not learned), genre and sortable
   columns. Click a game for its page: stats, player graph, the videos it learned from, its full vault note and a
   **Learn now** button.
-- **Market**: today's chart with rank moves, player changes, the hottest games and where players are by genre.
-- **Vault**: browse and read every note inside the app, with working links and callouts; "Open in Obsidian" any time.
+  - **Market**: today's chart with rank moves, player changes, the hottest games and where players are by genre.
+  - **Vault**: browse and read every note inside the app, with working links and callouts; "Open in Obsidian" any time.
 - **Settings**: mode, automatic runs, learning amounts, Claude model, chart, things to avoid, updates, folders and
   Remove from this PC.
 
-An **Update ready** card appears in the sidebar when a new version is out: one click installs it.
+An **Update ready** card appears in the sidebar when a new version is out: one click installs it. **Check for
+updates** always answers ("You're up to date", or why it couldn't check). The window has its own dark title bar.
 
 > AI playtesting on the real Roblox client still exists in the code but is **turned off** for now; video learning
 > replaces it.

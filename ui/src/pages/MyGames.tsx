@@ -1,36 +1,26 @@
-import { Camera, Gamepad2, MessageSquare, Play, Upload } from 'lucide-react'
-import { Card, Empty, PageHeader } from '../components/ui'
+import { MyGame, useApi } from '../lib/api'
+import { PageHeader, Skeleton } from '../components/ui'
+import { GameCard } from '../components/GameCard'
+import { FirstGame } from './Home'
 
-/** Finished games from the AI team land here (milestone M3+). */
+/** Every game the AI team has made for you. */
 export default function MyGames() {
-  const steps = [
-    { icon: Camera, title: 'Preview', text: 'Screenshots of every finished game, taken out of sight.' },
-    { icon: Play, title: 'Play', text: 'One click opens a private test copy only you can join.' },
-    { icon: MessageSquare, title: 'Feedback', text: 'Write what to change. The team fixes it on its own.' },
-    { icon: Upload, title: 'Publish', text: 'The only button you ever need to press.' },
-  ]
+  const { data: games } = useApi<MyGame[]>('my_games', {}, 5000)
+  const ready = (games ?? []).filter((g) => g.stage === 'ready').length
   return (
     <>
-      <PageHeader title="My Games" subtitle="Games your AI team has built for you." />
-      <Empty
-        icon={<Gamepad2 className="size-6" />}
-        title="No games yet"
-        text="Your team starts building once it has learned enough from the charts. Each finished game will show up here."
-      />
-      <div className="mt-6 grid grid-cols-4 gap-4">
-        {steps.map((s, i) => (
-          <Card key={s.title} className="p-5">
-            <div className="flex items-center gap-2.5">
-              <div className="grid size-9 place-items-center rounded-xl bg-card-2 text-brand">
-                <s.icon className="size-[18px]" />
-              </div>
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-mute">Step {i + 1}</span>
-            </div>
-            <div className="mt-3 text-[14px] font-semibold">{s.title}</div>
-            <div className="mt-1 text-[12.5px] leading-relaxed text-mute">{s.text}</div>
-          </Card>
-        ))}
-      </div>
+      <PageHeader title="My Games" subtitle={games?.length ? `${games.length} games · ${ready} ready to play` : 'Games your AI team has built for you.'} />
+      {!games ? (
+        <div className="grid grid-cols-3 gap-4">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-64" />)}</div>
+      ) : games.length === 0 ? (
+        <FirstGame />
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          {games.map((g) => (
+            <GameCard key={g.id} g={g} />
+          ))}
+        </div>
+      )}
     </>
   )
 }

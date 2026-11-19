@@ -61,6 +61,8 @@ fn check_update() {
         Ok(s) => json!({"state": "current", "current": s.current}),
         Err(e) => json!({"state": "failed", "error": e.to_string()}),
     };
+    let mut v = v;
+    v["checked_at"] = json!(crate::util::now_iso());
     st().update = v;
 }
 
@@ -103,6 +105,8 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
             json!({"ok": true})
         }
         "games" => games_json(&c),
+        "home" => home_json(&c),
+        "my_games" => c.store.get("my_games").unwrap_or(json!([])),
         "game" => game_json(&c, u(&a, "uid").ok_or_else(|| anyhow!("uid required"))?)?,
         "icon" => icon(&c, u(&a, "uid").unwrap_or(0)),
         "vault_image" => vault_image(&c, &s(&a, "path")),
@@ -306,6 +310,87 @@ fn status(c: &Ctx) -> Value {
         "notice": g.notice.as_ref().map(|(m, ok)| json!({"message": m, "ok": ok})),
         "update": g.update,
         "platform": std::env::consts::OS,
+    })
+}
+
+/// Home page: a very short summary of today and what each member of the team is doing.
+fn home_json(c: &Ctx) -> Value {
+    let today = crate::util::today();
+    let stdir = c.state_dir();
+    let games = c.store.games();
+    let learned_today = games.values().filter(|g| g.last_analysis.as_deref().is_some_and(|d| d.starts_with(&today))).count();
+    let new_today = games.values().filter(|g| g.first_seen.starts_with(&today)).count();
+    let charts_today = !c.store.chart_on(&today, &c.settings.sort_id).is_empty();
+    let scanning = crate::util::is_locked(&stdir, "scan");
+    let learning = crate::util::is_locked(&stdir, "autopilot");
+    let last_scan = c.store.last_run("scan", Some("ok")).map(|r| r.finished.unwrap_or(r.started));
+    let learning_game = c.store.get("learning_now").and_then(|n| n["game"].as_str().map(crate::vault::clean_display_name));
+    let next = crate::scan::learn_queue(c, Some(3));
+    let my_games = c.store.get("my_games").and_then(|v| v.as_array().map(|a| a.len())).unwrap_or(0);
+
+    let mut summary: Vec<String> = vec![];
+    summary.push(if scanning { "Charts updating now".into() } else if charts_today { "Charts updated".into() } else { "Charts not updated yet".into() });
+    if c.is_active() || learned_today > 0 {
+        summary.push(match learned_today {
+            0 => "no games learned yet".into(),
+            1 => "1 game learned".into(),
+            n => format!("{n} games learned"),
+        });
+    }
+    if new_today > 0 {
+        summary.push(format!("{new_today} new on the chart"));
+    }
+
+    let model_name = |m: &str| match m {
+        "" => "Default model".to_string(),
+        m if m.contains("opus") => "Opus 5.5".into(),
+        m if m.contains("sonnet") => "Sonnet 5.5".into(),
+        m if m.contains("haiku") => "Haiku 5.5".into(),
+        m => m.to_string(),
+    };
+    let researcher = if learning {
+        json!({"state": "working", "text": match &learning_game { Some(g) => format!("Learning {g} from YouTube"), None => "Picking games to learn".into() }})
+    } else if !c.is_active() {
+        json!({"state": "paused", "text": "Paused — Passive mode"})
+    } else if let Some(n) = next.first() {
+        json!({"state": "idle", "text": format!("Next up: {}", n.title)})
+    } else {
+        json!({"state": "idle", "text": "Every chart game is learned"})
+    };
+    let scout = if scanning {
+        json!({"state": "working", "text": "Reading today's Roblox charts"})
+    } else {
+        json!({"state": "idle", "text": if charts_today { "Today's charts are in" } else { "Updates the charts daily" }, "since": last_scan})
+    };
+    let soon = |id: &str, name: &str, role: &str, model: &str| json!({"id": id, "name": name, "role": role, "model": model, "state": "soon", "text": "Joins when game building arrives"});
+    let mut lead = soon("lead", "Lead", "Comes up with ideas and runs the team", "Opus 5.5");
+    lead["text"] = json!("Joins when game building arrives");
+    let mut s1 = scout;
+    s1["id"] = json!("scout");
+    s1["name"] = json!("Scout");
+    s1["role"] = json!("Watches the Roblox charts");
+    s1["model"] = json!("No AI needed");
+    let mut r1 = researcher;
+    r1["id"] = json!("researcher");
+    r1["name"] = json!("Researcher");
+    r1["role"] = json!("Learns how top games work");
+    r1["model"] = json!(model_name(&c.settings.claude_model));
+    let agents = vec![
+        lead,
+        s1,
+        r1,
+        soon("designer", "Designer", "Turns ideas into a game plan", "Sonnet 5.5"),
+        soon("builder", "Builder", "Writes the game in Roblox", "Sonnet 5.5"),
+        soon("artist", "Artist", "Makes maps, art and thumbnails", "Sonnet 5.5"),
+        soon("tester", "Tester", "Plays and checks every build", "Haiku 5.5"),
+    ];
+    json!({
+        "summary": summary,
+        "learned_today": learned_today, "new_today": new_today, "charts_today": charts_today,
+        "my_games": my_games,
+        "agents": agents,
+        "working": agents.iter().filter(|a| a["state"] == "working").count(),
+        "next": next.iter().map(|q| json!({"uid": q.universe_id, "title": q.title, "rank": q.rank, "reason": q.reason})).collect::<Vec<_>>(),
     })
 }
 

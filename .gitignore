@@ -8,3 +8,4 @@ build/
 .roxai-test/
 target/
 app/gen/
+ui/tsconfig.tsbuildinfo

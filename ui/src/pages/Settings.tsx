@@ -18,7 +18,7 @@ const MODELS = [
   ['claude-haiku-5-5', 'Haiku 5.5 — uses least'],
 ]
 
-export default function SettingsPage({ status, onChange }: { status: Status; onChange: () => void }) {
+export default function SettingsPage({ status, onChange, onCheckUpdates }: { status: Status; onChange: () => void; onCheckUpdates: () => void }) {
   const { data, reload } = useApi<S>('settings_get')
   const [s, setS] = useState<S | null>(null)
   const [saved, setSaved] = useState(false)
@@ -108,7 +108,7 @@ export default function SettingsPage({ status, onChange }: { status: Status; onC
                 Install update
               </Button>
             ) : (
-              <Button size="sm" icon={<RefreshCw className={cx('size-3.5', status.update.state === 'checking' && 'animate-spin')} />} onClick={() => call('update_check')}>
+              <Button size="sm" icon={<RefreshCw className={cx('size-3.5', status.update.state === 'checking' && 'animate-spin')} />} onClick={onCheckUpdates}>
                 Check now
               </Button>
             )}

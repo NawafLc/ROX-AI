@@ -57,7 +57,7 @@ export type Status = {
   job: { id: string; text: string; progress: number | null } | null
   queued: string[]
   notice: { message: string; ok: boolean } | null
-  update: { state: 'checking' | 'current' | 'available' | 'installing' | 'failed'; latest?: string; current?: string; error?: string }
+  update: { state: 'checking' | 'current' | 'available' | 'installing' | 'failed'; latest?: string; current?: string; error?: string; checked_at?: string }
   platform: string
 }
 export type Dep = { id: string; name: string; why: string; ok: boolean; required: boolean; action: { kind: 'install' | 'signin'; label: string } | null }
@@ -97,4 +97,28 @@ export function ago(iso: string | null | undefined): string {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`
   const d = Math.floor(s / 86400)
   return d === 1 ? 'yesterday' : `${d} days ago`
+}
+
+export type AgentState = 'working' | 'idle' | 'paused' | 'soon'
+export type Agent = { id: string; name: string; role: string; model: string; state: AgentState; text: string; since?: string | null }
+export type Home = {
+  summary: string[]
+  learned_today: number
+  new_today: number
+  charts_today: boolean
+  my_games: number
+  agents: Agent[]
+  working: number
+  next: { uid: number; title: string; rank: number; reason: string }[]
+}
+/** A game the AI team made (filled in by the building milestones). */
+export type MyGame = {
+  id: string
+  title: string
+  genre: string
+  stage: 'idea' | 'building' | 'testing' | 'ready' | 'published'
+  progress: number
+  stage_text: string
+  thumb?: string | null
+  updated?: string
 }

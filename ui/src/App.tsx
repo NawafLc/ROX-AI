@@ -1,9 +1,11 @@
-import { BookOpen, Download, Gamepad2, LayoutDashboard, Library, LineChart, Loader2, RefreshCw, Settings as Cog, Sparkles } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { BookOpen, Download, Gamepad2, House, Library, LineChart, Loader2, RefreshCw, Settings as Cog, Sparkles, Users } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Status, call, useApi } from './lib/api'
 import { Toast, cx } from './components/ui'
 import { Logo } from './components/Logo'
-import Studio from './pages/Studio'
+import Home from './pages/Home'
+import Team from './pages/Team'
+import { TitleBar } from './components/TitleBar'
 import MyGames from './pages/MyGames'
 import Research from './pages/Research'
 import GameDetail from './pages/GameDetail'
@@ -17,15 +19,18 @@ export type Route = { page: string; arg: string }
 function parse(): Route {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''))
   const i = h.indexOf('/')
-  return i < 0 ? { page: h || 'studio', arg: '' } : { page: h.slice(0, i), arg: h.slice(i + 1) }
+  return i < 0 ? { page: h || 'home', arg: '' } : { page: h.slice(0, i), arg: h.slice(i + 1) }
 }
 export function go(page: string, arg = '') {
   location.hash = '/' + page + (arg ? '/' + encodeURIComponent(arg) : '')
 }
 
 const NAV = [
-  { id: 'studio', label: 'Studio', icon: LayoutDashboard },
+  { id: 'home', label: 'Home', icon: House },
   { id: 'games', label: 'My Games', icon: Gamepad2 },
+  { id: 'team', label: 'Team', icon: Users },
+]
+const KNOWLEDGE = [
   { id: 'research', label: 'Research', icon: Library },
   { id: 'market', label: 'Market', icon: LineChart },
   { id: 'vault', label: 'Vault', icon: BookOpen },
@@ -50,6 +55,21 @@ export default function App() {
   }, [status?.notice, lastNotice])
   const closeToast = useCallback(() => setToast(null), [])
 
+  // "Check for updates" always answers: up to date, update ready, or why it couldn't check
+  const asked = useRef<number | null>(null)
+  const checkUpdates = useCallback(() => {
+    asked.current = Date.now() - 1500 // backend times are whole seconds
+    call('update_check').then(reload)
+  }, [reload])
+  useEffect(() => {
+    const u = status?.update
+    if (!asked.current || !u?.checked_at || new Date(u.checked_at).getTime() < asked.current) return
+    asked.current = null
+    if (u.state === 'current') setToast({ message: `You're up to date — version ${status!.version} is the latest.`, ok: true })
+    else if (u.state === 'available') setToast({ message: `Version ${u.latest} is ready. Press Install update.`, ok: true })
+    else if (u.state === 'failed') setToast({ message: `Couldn't check for updates: ${u.error ?? 'no connection'}`, ok: false })
+  }, [status])
+
   if (!status)
     return (
       <div className="grid h-full place-items-center">
@@ -62,14 +82,17 @@ export default function App() {
 
   if (!status.setup_complete) return <Setup status={status} onDone={reload} />
 
-  const active = route.page === 'game' ? 'research' : route.page
+  const active = route.page === 'game' ? 'research' : route.page || 'home'
   let page
   switch (route.page) {
     case 'games':
       page = <MyGames />
       break
+    case 'team':
+      page = <Team />
+      break
     case 'research':
-      page = <Research status={status} />
+      page = <Research status={status} onChange={reload} />
       break
     case 'game':
       page = <GameDetail uid={Number(route.arg)} status={status} />
@@ -81,29 +104,30 @@ export default function App() {
       page = <Vault path={route.arg} />
       break
     case 'settings':
-      page = <SettingsPage status={status} onChange={reload} />
+      page = <SettingsPage status={status} onChange={reload} onCheckUpdates={checkUpdates} />
       break
     default:
-      page = <Studio status={status} onChange={reload} />
+      page = <Home status={status} />
   }
 
   return (
-    <div className="flex h-full">
-      <aside className="flex w-[228px] shrink-0 flex-col border-r border-line bg-panel px-3 py-4">
-        <div className="mb-6 flex items-center gap-2.5 px-2.5">
-          <Logo size={30} />
-          <div>
-            <div className="text-[15px] font-bold tracking-tight">ROX-AI</div>
-            <div className="text-[11px] text-mute">Game studio</div>
-          </div>
-        </div>
+    <div className="flex h-full flex-col">
+      <TitleBar />
+      <div className="flex min-h-0 flex-1">
+      <aside className="flex w-[228px] shrink-0 flex-col border-r border-line bg-panel px-3 pb-4 pt-3">
         <nav className="flex flex-col gap-0.5">
           {NAV.map((n) => (
-            <NavItem key={n.id} active={active === n.id} onClick={() => go(n.id)} icon={<n.icon className="size-[18px]" />} label={n.label} badge={n.id === 'studio' && status.busy} />
+            <NavItem key={n.id} active={active === n.id} onClick={() => go(n.id)} icon={<n.icon className="size-[18px]" />} label={n.label} badge={n.id === 'team' && status.busy} />
+          ))}
+        </nav>
+        <div className="mb-1.5 mt-6 px-3 text-[10.5px] font-semibold uppercase tracking-wider text-mute">Knowledge</div>
+        <nav className="flex flex-col gap-0.5">
+          {KNOWLEDGE.map((n) => (
+            <NavItem key={n.id} active={active === n.id} onClick={() => go(n.id)} icon={<n.icon className="size-[18px]" />} label={n.label} />
           ))}
         </nav>
         <div className="mt-auto flex flex-col gap-2">
-          <UpdateCard status={status} />
+          <UpdateCard status={status} onCheck={checkUpdates} />
           <NavItem active={active === 'settings'} onClick={() => go('settings')} icon={<Cog className="size-[18px]" />} label="Settings" />
           <div className="px-3 text-[11px] text-mute">Version {status.version}</div>
         </div>
@@ -113,6 +137,7 @@ export default function App() {
           {page}
         </div>
       </main>
+      </div>
       {toast && <Toast message={toast.message} ok={toast.ok} onClose={closeToast} />}
     </div>
   )
@@ -136,7 +161,7 @@ function NavItem({ active, onClick, icon, label, badge }: { active: boolean; onC
 }
 
 /** Always visible: tells you if there's a new version and installs it with one click. */
-function UpdateCard({ status }: { status: Status }) {
+function UpdateCard({ status, onCheck }: { status: Status; onCheck: () => void }) {
   const u = status.update
   const [busy, setBusy] = useState(false)
   if (u.state === 'available' || u.state === 'installing')
@@ -161,12 +186,12 @@ function UpdateCard({ status }: { status: Status }) {
     )
   return (
     <button
-      onClick={() => call('update_check')}
+      onClick={onCheck}
       className="flex h-9 items-center gap-2.5 rounded-[10px] px-3 text-[12.5px] text-mute hover:bg-card hover:text-ink-2"
       title={u.state === 'failed' ? u.error : undefined}
     >
       <RefreshCw className={cx('size-4', u.state === 'checking' && 'animate-spin')} />
-      {u.state === 'checking' ? 'Checking for updates…' : u.state === 'failed' ? "Couldn't check — retry" : 'Up to date'}
+      {u.state === 'checking' ? 'Checking for updates…' : u.state === 'failed' ? "Couldn't check — retry" : 'Check for updates'}
     </button>
   )
 }

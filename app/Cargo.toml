@@ -18,6 +18,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde_json = "1"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
 [features]
 # embed the built interface (ui/dist) into the exe
 default = ["custom-protocol"]
