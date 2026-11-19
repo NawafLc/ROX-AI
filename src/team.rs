@@ -515,6 +515,7 @@ pub fn paused_until(ctx: &Ctx) -> Option<String> {
 /// Claude needs a break. Safe to call any time (one studio at a time).
 pub fn run(ctx: &Ctx) -> Result<Value> {
     let _lock = crate::util::single_instance(&ctx.state_dir(), "studio")?;
+    let _awake = crate::util::KeepAwake::new(); // building runs unattended, often overnight
     crate::session::clear_stop(ctx);
     let mut log = vec![];
     loop {

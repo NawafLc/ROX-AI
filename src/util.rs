@@ -251,3 +251,28 @@ pub fn open_path(p: &str) {
         let _ = std::process::Command::new("xdg-open").arg(p).spawn();
     }
 }
+
+/// Keeps the PC from idle-sleeping while it lives (long background work such as the AI team building a game).
+/// The screen may still turn off; a closed lid or a manual Sleep still sleeps.
+pub struct KeepAwake;
+
+impl KeepAwake {
+    pub fn new() -> Self {
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+        }
+        KeepAwake
+    }
+}
+
+impl Drop for KeepAwake {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS};
+            SetThreadExecutionState(ES_CONTINUOUS);
+        }
+    }
+}

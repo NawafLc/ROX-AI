@@ -142,7 +142,7 @@ pub fn tool_defs() -> Vec<Value> {
         t("scan_charts", "Run the daily chart scan now (stats/trends for every chart game, chart note, genre notes, dashboard). ~1 minute.", obj(json!({"limit": {"type": "integer"}}), &[])),
         t("playtest_queue", "Games that should be playtested next (never played / stale / updated since last playtest), best first.", obj(json!({"limit": {"type": "integer"}}), &[])),
         t("playbook", "The full playtest playbook (how to play, safety rules, what to write). Read it before a playtest.", obj(json!({"universe_id": {"type": "integer"}}), &[])),
-        t("vault_read_game", "Read the 🤖 analysis sections and ✍️ user notes stored for a game (extend rather than overwrite).", obj(json!({"universe_id": {"type": "integer"}}), &["universe_id"])),
+        t("vault_read_game", "Read the 🤖 analysis sections and ✍️ user notes stored for a game (extend rather than overwrite). Give universe_id, or the game's name.", obj(json!({"universe_id": {"type": "integer"}, "name": {"type": "string"}}), &[])),
         t("vault_write_game_analysis", &format!("Write/replace 🤖 sections of a game's template note without a playtest (e.g. from research). Section keys: {sec_keys}. Score keys (1-10): fun, clarity, retention, monetization_aggressiveness, polish, clone_difficulty, trend_durability."),
           obj(json!({"universe_id": {"type": "integer"}, "sections": {"type": "object", "additionalProperties": {"type": "string"}}, "scores": {"type": "object", "additionalProperties": {"type": "integer"}}, "one_liner": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "method": {"type": "string", "enum": ["videos", "data", "playtest"]}, "sources": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "url": {"type": "string"}}}}}), &["universe_id", "sections"])),
         t("vault_write_insight", "Create a note in 05 Insights (weekly market report, comparisons, trends). Link games with [[02 Games/<Name>]].",
@@ -213,6 +213,24 @@ impl Server {
 
     fn vault(&self) -> Vault {
         Vault::new(self.ctx.vault())
+    }
+
+    /// A tracked game's universe id from its name (exact match first, then the only partial match).
+    fn uid_by_name(&self, name: &str) -> Result<u64> {
+        let q = name.trim().to_lowercase();
+        if q.is_empty() {
+            bail!("give universe_id or name (find games with charts, vault_search or vault_list)");
+        }
+        let games = self.ctx.store.games();
+        if let Some(g) = games.values().find(|g| g.name.to_lowercase() == q) {
+            return Ok(g.universe_id);
+        }
+        let hits: Vec<_> = games.values().filter(|g| g.name.to_lowercase().contains(&q)).collect();
+        match hits.as_slice() {
+            [g] => Ok(g.universe_id),
+            [] => bail!("no tracked game is called '{name}' (try vault_search)"),
+            many => bail!("'{name}' matches several games: {}", many.iter().take(8).map(|g| format!("{} ({})", g.name, g.universe_id)).collect::<Vec<_>>().join(", ")),
+        }
     }
 
     fn note_for(&self, uid: u64) -> Result<std::path::PathBuf> {
@@ -365,8 +383,10 @@ impl Server {
                 None => Out::text(playbook_text("<id>", "<game>", "?")),
             },
             "vault_read_game" => {
-                let uid =
-                    arg_u64(a, "universe_id").ok_or_else(|| anyhow!("universe_id required"))?;
+                let uid = match arg_u64(a, "universe_id") {
+                    Some(u) => u,
+                    None => self.uid_by_name(arg_str(a, "name"))?,
+                };
                 let p = self.note_for(uid)?;
                 Out::json(&json!({"note": v.rel(&p), "sections": v.read_note_sections(&p)}))
             }
