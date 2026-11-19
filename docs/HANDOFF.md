@@ -75,24 +75,19 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
     owner's Publish click, the Roblox key stays only on the PC and agents can't read it.
 
 ## Where we are / what's next (see PLAN.md build order)
-- ✅ M0 new UI (Tauri + React). ✅ M1 Playbook.
-- **M2 headless build pipeline: built; the local half is verified on the owner's PC** (Rojo + Lune install
-  themselves, the starter game builds, every script compiles, unit tests pass, syntax errors and failing tests are
-  reported). Settings → Game building has the guided Roblox connection (test place + API key) and **Test pipeline**.
-  CLI: `roxai pipeline tools|new|build [--remote]|selftest`, `roxai roblox connect --place <id>` (key on stdin)
-  `|status|disconnect`. CI runs `pipeline selftest` on Linux and Windows. **Waiting on the owner** for the key + test
-  place; Connect then runs the full self-test (upload + Luau Execution) by itself. After that: M3.
+- ✅ M0 new UI (Tauri + React). ✅ M1 Playbook. ✅ M2 headless build pipeline — **verified live on the owner's PC**:
+  build → script checks + unit tests (Lune) → upload as Saved version → 5/5 specs passed on Roblox's servers via Luau
+  Execution. Test place "ROX-AI Test" (alt account) is connected; key is DPAPI-encrypted in `data\secrets\`.
+  Settings → Game building has the connection card and **Test pipeline**. CLI: `roxai pipeline tools|new|build
+  [--remote]|selftest`, `roxai roblox connect --place <id>` (key on stdin)`|status|disconnect`. CI runs
+  `pipeline selftest` on Linux and Windows.
+- Roblox refuses uploads (HTTP 409 "server is busy") while the test place is open in **Studio**; uploads retry for a
+  few minutes and then tell the owner to close Studio. Agents never need Studio open.
 - Dev builds (exe under `target\`) skip Windows registration in `setup::ensure`, so interface previews never take
   over the real app's schedule or Claude connections (`ROXAI_DEV_REGISTER=1` forces it).
-- Original M2 brief — needs the owner once: (1) a free Open Cloud API key (walk them through
-  create.roblox.com → Creator Dashboard → Open Cloud → API keys; permissions for place publishing to a test
-  universe and Luau execution; store it only in ROX-AI's data folder, never in the repo or logs) and (2) a private
-  test experience/place. On the PC: install Rojo + Lune into ROX-AI's `tools\` (portable), make a project template,
-  build a place file, upload to the test place, run a Luau Execution test and read the result. Add this to the app
-  (Settings → Roblox connection, deps list) and CI where possible.
-- Then M3 agent team (Lead + core agents, task board, models per agent, Lead chat), M4 Market ideas, M5 invisible
-  Studio + My Games Play/Feedback/Publish, M6 Create + Library, M7 Live ops, M8 Promo, M9 iPhone.
-- Option the owner was offered: build M4 (needs nothing from them) before M2.
+- **Next: M3 agent team** (Lead + core agents, task board, models per agent, Lead chat, first small game end to end),
+  then M4 Market ideas, M5 invisible Studio + My Games Play/Feedback/Publish, M6 Create + Library, M7 Live ops,
+  M8 Promo, M9 iPhone.
 
 ## Known notes
 - Windows title bar is custom (frameless); confirm on their screen that dragging/maximize/close and the border look right.
