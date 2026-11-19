@@ -12,6 +12,7 @@ pub mod deps;
 pub mod doctor;
 pub mod gamesview;
 pub mod mcp;
+pub mod playbook;
 pub mod relocate;
 pub mod scan;
 pub mod selftest;
@@ -34,3 +35,4 @@ pub const VERSION: &str = match option_env!("ROXAI_VERSION") {
 };
 pub const PLAYBOOK: &str = include_str!("prompts/playtest.md");
 pub const LEARN_PLAYBOOK: &str = include_str!("prompts/learn.md");
+pub const PLAYBOOK_GUIDE: &str = include_str!("prompts/playbook.md");

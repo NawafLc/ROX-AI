@@ -112,6 +112,12 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
         "vault_image" => vault_image(&c, &s(&a, "path")),
         "chart" => chart_json(&c),
         "learn_queue" => serde_json::to_value(crate::scan::learn_queue(&c, Some(10)))?,
+        "playbook" => {
+            let st = crate::playbook::load(&c);
+            json!({"chapters": crate::playbook::status(&c), "due": crate::playbook::due(&c).iter().map(|x| x.id).collect::<Vec<_>>(),
+                "rules": st.chapters.values().map(|x| x.rules.len()).sum::<usize>(), "sources": st.sources.len(),
+                "writing": c.store.get("playbook_now").and_then(|n| n["chapter"].as_str().map(String::from))})
+        }
         "vault_tree" => json!(crate::gamesview::vault_tree(&c).into_iter().map(|(f, files)| json!({"folder": f, "files": files})).collect::<Vec<_>>()),
         "note" => note_json(&c, &s(&a, "path"))?,
         "resolve" => json!({"path": crate::gamesview::resolve(&c, &s(&a, "target"))}),
@@ -139,6 +145,10 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
                 "scan" => bg(&["scan"]),
                 "learn" => bg(&["autopilot", "--force"]),
                 "learn_game" => bg(&["learn", &u(&a, "uid").ok_or_else(|| anyhow!("uid required"))?.to_string()]),
+                "playbook" => match a.get("chapter").and_then(|v| v.as_str()) {
+                    Some(ch) => bg(&["playbook", "--chapter", ch]),
+                    None => bg(&["playbook", "--force"]),
+                },
                 "stop" => {
                     crate::session::request_stop(&c, "Stop button");
                     bg(&["stop"]);
@@ -283,7 +293,10 @@ fn status(c: &Ctx) -> Value {
     let scanning = crate::util::is_locked(&stdir, "scan");
     let learning_game = c.store.get("learning_now").and_then(|n| n["game"].as_str().map(|g| crate::vault::clean_display_name(g)));
     let blocked = c.store.get("blocked_reason").and_then(|b| b["reason"].as_str().map(String::from));
-    let activity = if learning {
+    let writing = c.store.get("playbook_now").and_then(|n| n["chapter"].as_str().map(String::from));
+    let activity = if learning && writing.is_some() {
+        json!({"kind": "learning", "title": format!("Writing the playbook: {}", writing.unwrap_or_default()), "detail": "Claude is reading developer devlogs, Roblox's docs and your game notes."})
+    } else if learning {
         match &learning_game {
             Some(g) => json!({"kind": "learning", "title": format!("Learning {g}"), "detail": "Claude is reading YouTube videos about it. This takes a few minutes per game."}),
             None => json!({"kind": "learning", "title": "Learning new games", "detail": "Picking the next games to learn."}),
@@ -348,7 +361,10 @@ fn home_json(c: &Ctx) -> Value {
         m if m.contains("haiku") => "Haiku 5.5".into(),
         m => m.to_string(),
     };
-    let researcher = if learning {
+    let writing = c.store.get("playbook_now").and_then(|n| n["chapter"].as_str().map(String::from));
+    let researcher = if learning && writing.is_some() {
+        json!({"state": "working", "text": format!("Writing the playbook: {}", writing.unwrap_or_default())})
+    } else if learning {
         json!({"state": "working", "text": match &learning_game { Some(g) => format!("Learning {g} from YouTube"), None => "Picking games to learn".into() }})
     } else if !c.is_active() {
         json!({"state": "paused", "text": "Paused — Passive mode"})

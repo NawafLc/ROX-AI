@@ -86,6 +86,18 @@ pub enum Cmd {
     },
     /// Learn one game now from YouTube videos (via Claude Code)
     Learn { universe_id: u64 },
+    /// Write the Playbook now: one chapter, or the most outdated ones
+    Playbook {
+        /// chapter id, e.g. monetization
+        #[arg(long)]
+        chapter: Option<String>,
+        /// write even if nothing is due
+        #[arg(long)]
+        force: bool,
+        /// only refresh the notes and numbers (no Claude)
+        #[arg(long)]
+        render: bool,
+    },
     /// Serve the app's interface + API on localhost (previews, and later the iPhone app)
     #[command(hide = true)]
     UiServer {
@@ -99,6 +111,10 @@ pub enum Cmd {
     MakeIcons { dir: std::path::PathBuf },
     /// Windows self-test of input, capture, hooks and scheduler (used by CI)
     Selftest,
+}
+
+fn json_chapters(ctx: &Ctx) -> serde_json::Value {
+    serde_json::Value::Array(crate::playbook::status(ctx))
 }
 
 fn print(v: impl std::fmt::Display) {
@@ -246,6 +262,14 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
                 Some(universe_id),
                 Duration::from_secs(60),
             )));
+        }
+        Cmd::Playbook { chapter, force, render } => {
+            if render {
+                crate::playbook::render_all(ctx)?;
+                print(pretty(&json_chapters(ctx)));
+            } else {
+                print(pretty(&crate::playbook::run(ctx, chapter.as_deref(), force)?));
+            }
         }
         Cmd::Selftest => return Ok(crate::selftest::run(ctx)),
     }

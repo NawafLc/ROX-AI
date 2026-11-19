@@ -105,8 +105,8 @@ Decided together, point by point. Personal use for now; the parts that would cha
 
 | # | Milestone | Needs you |
 |---|---|---|
-| M0 | New UI foundation (Tauri), design system, move existing screens | Look at screenshots, say what you think |
-| M1 | Playbook v1: chapters, benchmarks, devlog learning, search tool | — |
+| M0 ✅ | New UI foundation (Tauri), design system, move existing screens | Look at screenshots, say what you think |
+| M1 ✅ | Playbook v1: chapters, benchmarks, devlog learning, search tool | — |
 | M2 | Headless build pipeline: Rojo, Lune, project template, test place + Luau Execution tests | **Open Cloud API key** (one-time), **access to your PC** for testing |
 | M3 | Agent team v1: Lead + core agents, task board, models, parallel/one-at-a-time, Lead chat; first small game end to end | PC access |
 | M4 | Market: all charts, trends, pitches, scoring, avoid list, size cap, game count | — |

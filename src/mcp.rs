@@ -20,7 +20,8 @@ Typical flows:
 - \"What's trending?\" → charts / game_info.
 - \"Learn <game>\" → learn_playbook(universe_id): game_info → youtube_search → youtube_video (several) → vault_write_game_analysis with sources.
 - \"Daily run\" → learn_queue, learn each game one at a time, then vault_write_insight with a market report.
-Games are learned from public data and YouTube videos (no screen use).";
+Games are learned from public data and YouTube videos (no screen use).
+- The Playbook (playbook_status / playbook_read / playbook_search) holds the rules for making successful Roblox games; the owner's rules in it always win.";
 
 pub fn learn_text(ctx: &Ctx, uid: &str, name: &str, rank: &str) -> String {
     crate::LEARN_PLAYBOOK
@@ -121,6 +122,18 @@ pub fn tool_defs() -> Vec<Value> {
           obj(json!({"video_id": {"type": "string", "description": "video id or URL"}}), &["video_id"])),
         t("learn_queue", "Chart games that still need learning (never analyzed, stale, or updated since), best first.", obj(json!({"limit": {"type": "integer"}}), &[])),
         t("learn_playbook", "How to learn a game from data + YouTube videos and what to write. Read it before analyzing a game.", obj(json!({"universe_id": {"type": "integer"}}), &[])),
+        t("playbook_status", "The ROX-AI Playbook (rules for making successful Roblox games): every chapter with rule counts, sources and when it was last written.", obj(json!({}), &[])),
+        t("playbook_read", &format!("Read one Playbook chapter: the owner's rules (always follow them), the rules with confidence and evidence, and our own numbers. Chapters: {}.", crate::playbook::ids().join(", ")),
+          obj(json!({"chapter": {"type": "string"}}), &["chapter"])),
+        t("playbook_search", "Search the Playbook for rules about a topic (e.g. 'starter pack price', 'tutorial', 'DataStore'). Returns the best matching rules with chapter and confidence.",
+          obj(json!({"query": {"type": "string"}, "chapter": {"type": "string"}, "max_results": {"type": "integer", "default": 15}}), &["query"])),
+        t("playbook_benchmarks", "Our own numbers from every tracked game, overall and by genre: game passes, pass prices, developer products, server size, game age, update frequency, favorites per 1K visits.",
+          obj(json!({"genre": {"type": "string"}}), &[])),
+        t("playbook_guide", "How to write one Playbook chapter (sources to use, what makes a good rule). Read it before writing a chapter.", obj(json!({"chapter": {"type": "string"}}), &["chapter"])),
+        t("playbook_write_rules", "Save rules to a Playbook chapter. replace=true writes the chapter's complete rule set; replace=false adds/updates rules. Each rule: {text, confidence: strong|emerging|opinion, why, evidence: [game titles or URLs]}.",
+          obj(json!({"chapter": {"type": "string"}, "rules": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "confidence": {"type": "string", "enum": ["strong", "emerging", "opinion"]}, "why": {"type": "string"}, "evidence": {"type": "array", "items": {"type": "string"}}}, "required": ["text", "confidence"]}}, "summary": {"type": "string"}, "replace": {"type": "boolean", "default": true}}), &["chapter", "rules"])),
+        t("playbook_add_sources", "Record the devlogs, postmortems, docs and threads you used for a chapter (so later runs find new ones). Each: {title, url, kind: devlog|postmortem|docs|devforum|video|article, summary}.",
+          obj(json!({"chapter": {"type": "string"}, "sources": {"type": "array", "items": {"type": "object"}}}), &["chapter", "sources"])),
         t("charts", "Live Roblox chart (default: the configured chart, usually 'top-trending'): rank, players, likes, genre and ROX-AI status for each game. Other sort_ids: top-playing-now, up-and-coming, fun-with-friends, top-revisited.",
           obj(json!({"sort_id": {"type": "string"}, "limit": {"type": "integer", "default": 25}}), &[])),
         t("list_chart_sorts", "List every chart Roblox currently shows (sortId + display name).", obj(json!({}), &[])),
@@ -519,6 +532,38 @@ impl Server {
                     content.insert(0, json!({"type": "image", "data": base64::engine::general_purpose::STANDARD.encode(img), "mimeType": "image/jpeg"}));
                 }
                 Out { content, is_error: false }
+            }
+            "playbook_status" => Out::json(&json!({"chapters": crate::playbook::status(ctx), "due": crate::playbook::due(ctx).iter().map(|c| c.id).collect::<Vec<_>>()})),
+            "playbook_read" => Out::text(crate::playbook::read_chapter(ctx, arg_str(a, "chapter"))?),
+            "playbook_search" => {
+                let ch = arg_str(a, "chapter");
+                let hits = crate::playbook::search(ctx, arg_str(a, "query"), (!ch.is_empty()).then_some(ch), arg_u64(a, "max_results").unwrap_or(15) as usize);
+                if hits.is_empty() {
+                    Out::text("No matching rules. Try other words, or read a chapter with playbook_read.")
+                } else {
+                    Out::json(&Value::Array(hits))
+                }
+            }
+            "playbook_benchmarks" => {
+                let g = arg_str(a, "genre");
+                Out::json(&crate::playbook::benchmarks_json(&crate::playbook::facts(ctx), (!g.is_empty()).then_some(g)))
+            }
+            "playbook_guide" => match crate::playbook::chapter(arg_str(a, "chapter")) {
+                Some(c) => Out::text(crate::playbook::guide(ctx, c)),
+                None => Out::err(format!("Unknown chapter. Chapters: {}", crate::playbook::ids().join(", "))),
+            },
+            "playbook_write_rules" => {
+                let rules = a.get("rules").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+                if rules.is_empty() {
+                    return Ok(Out::err("rules is empty"));
+                }
+                let n = crate::playbook::write_rules(ctx, arg_str(a, "chapter"), &rules, arg_str(a, "summary"), arg_bool(a, "replace", true))?;
+                Out::text(format!("Saved. The chapter now has {n} rules."))
+            }
+            "playbook_add_sources" => {
+                let src = a.get("sources").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+                let n = crate::playbook::add_sources(ctx, arg_str(a, "chapter"), &src)?;
+                Out::text(format!("Recorded {n} new source(s)."))
             }
             "learn_queue" => Out::json(&serde_json::to_value(crate::scan::learn_queue(
                 ctx,

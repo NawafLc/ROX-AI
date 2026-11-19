@@ -99,6 +99,9 @@ pub struct Settings {
     pub videos_per_game: usize,
     /// genres / themes / mechanics to never build (comma separated, used by the idea pipeline)
     pub avoid: String,
+    /// playbook chapters Claude rewrites per learning run, and how old a chapter must be to be refreshed
+    pub playbook_chapters_per_run: usize,
+    pub playbook_refresh_days: f64,
 }
 
 impl Default for Settings {
@@ -136,6 +139,8 @@ impl Default for Settings {
             reanalyze_after_days: 30.0,
             videos_per_game: 4,
             avoid: String::new(),
+            playbook_chapters_per_run: 1,
+            playbook_refresh_days: 7.0,
         }
     }
 }

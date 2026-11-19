@@ -26,12 +26,14 @@ pub const DIR_GENRES: &str = "04 Genres";
 pub const DIR_INSIGHTS: &str = "05 Insights";
 pub const DIR_TEMPLATES: &str = "Templates";
 pub const DIR_ATTACH: &str = "Attachments";
-pub const ALL_DIRS: [&str; 7] = [
+pub const DIR_PLAYBOOK: &str = "06 Playbook";
+pub const ALL_DIRS: [&str; 8] = [
     DIR_CHARTS,
     DIR_GAMES,
     DIR_PLAYTESTS,
     DIR_GENRES,
     DIR_INSIGHTS,
+    DIR_PLAYBOOK,
     DIR_TEMPLATES,
     DIR_ATTACH,
 ];
@@ -316,6 +318,7 @@ playtest the top games once a week, and turns each game into a detailed **templa
 | `03 Playtests` | Logs of every AI playtest session with screenshots |
 | `04 Genres` | Genre overviews: which genres are winning, patterns |
 | `05 Insights` | Weekly market reports and cross-game insights written by Claude |
+| `06 Playbook` | **The playbook**: rules for making successful Roblox games, backed by evidence and our own numbers |
 
 **Legend in game notes:** 📊 = data refreshed daily · 🤖 = written by Claude · ✍️ = yours (never overwritten).
 

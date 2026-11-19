@@ -21,6 +21,11 @@ The app (version 2.1+, rebuilt with Tauri + React) has a sidebar with:
   parts arrive in the next milestones, see `docs/PLAN.md`).
 - **Team**: each agent with its model and live status; the chat with the Lead goes here.
 - Under **Knowledge**:
+  - **Playbook**: the rules your AI team builds from, in 11 chapters (ideas, core loops, first 5 minutes,
+    progression & economy, monetization, retention, UI/UX, social, technical, launch & live ops, marketing). Each
+    chapter has **our own numbers** computed from every tracked game, **rules** Claude writes from your game notes,
+    developer devlogs/postmortems and Roblox's docs (each marked strong / emerging / opinion, with evidence), the
+    **sources** it read, and **My rules**: yours, never overwritten, and they always win.
   - **Research**: what ROX-AI is doing right now (with **Stop**), the Passive/Active switch, and every tracked game with search, filters (learned / from videos / not learned), genre and sortable
   columns. Click a game for its page: stats, player graph, the videos it learned from, its full vault note and a
   **Learn now** button.
@@ -130,12 +135,14 @@ Most settings are on the app's **Settings** page. All of them live in `data\sett
 | `reanalyze_after_days` | 30 | re-learn a game after this long |
 | `playtesting_enabled` | false | AI playtesting on the Roblox client (off) |
 | `avoid` | (empty) | genres or themes your AI team should never make |
+| `playbook_chapters_per_run` | 1 | Playbook chapters Claude rewrites after each day's learning |
+| `playbook_refresh_days` | 7 | rewrite a chapter once it is this old |
 
 ## Command line (optional)
 
 `roxai.exe` (next to `ROX-AI.exe`) does everything the app does, for scripting:
 ```
-roxai scan | autopilot --force | learn <universeId> | queue | doctor | stop | update | remove | selftest
+roxai scan | autopilot --force | learn <universeId> | playbook [--chapter monetization] [--render] | queue | doctor | stop | update | remove | selftest
 ```
 
 ## How it works

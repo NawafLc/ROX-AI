@@ -1,10 +1,11 @@
-import { BookOpen, Download, Gamepad2, House, Library, LineChart, Loader2, RefreshCw, Settings as Cog, Sparkles, Users } from 'lucide-react'
+import { BookMarked, BookOpen, Download, Gamepad2, House, Library, LineChart, Loader2, RefreshCw, Settings as Cog, Sparkles, Users } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Status, call, useApi } from './lib/api'
 import { Toast, cx } from './components/ui'
 import { Logo } from './components/Logo'
 import Home from './pages/Home'
 import Team from './pages/Team'
+import Playbook from './pages/Playbook'
 import { TitleBar } from './components/TitleBar'
 import MyGames from './pages/MyGames'
 import Research from './pages/Research'
@@ -31,6 +32,7 @@ const NAV = [
   { id: 'team', label: 'Team', icon: Users },
 ]
 const KNOWLEDGE = [
+  { id: 'playbook', label: 'Playbook', icon: BookMarked },
   { id: 'research', label: 'Research', icon: Library },
   { id: 'market', label: 'Market', icon: LineChart },
   { id: 'vault', label: 'Vault', icon: BookOpen },
@@ -90,6 +92,9 @@ export default function App() {
       break
     case 'team':
       page = <Team />
+      break
+    case 'playbook':
+      page = <Playbook id={route.arg} status={status} />
       break
     case 'research':
       page = <Research status={status} onChange={reload} />

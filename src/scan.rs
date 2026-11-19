@@ -351,6 +351,9 @@ fn scan_inner(ctx: &Ctx, api: &dyn RobloxApi, limit: usize, day: String) -> Resu
         &recent_playtests(ctx, 8),
         &crate::doctor::short_status(ctx),
     )?;
+    if let Err(e) = crate::playbook::render_all(ctx) {
+        crate::warn!("playbook refresh failed: {e:#}");
+    }
     Ok(ScanResult {
         day: day.clone(),
         chart: sname,

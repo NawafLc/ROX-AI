@@ -41,6 +41,8 @@ jobs:
           echo "{\"vault_path\":\"$RUNNER_TEMP/rx/vault\",\"chart_limit\":5}" > "$RUNNER_TEMP/rx/settings.json"
           ROXAI_HOME="$RUNNER_TEMP/rx" cargo run --quiet -- scan
           ls "$RUNNER_TEMP/rx/vault/02 Games"
+          ls "$RUNNER_TEMP/rx/vault/06 Playbook"
+          grep -q "Our numbers" "$RUNNER_TEMP/rx/vault/06 Playbook/05 Monetization and pricing.md"
 
   windows:
     runs-on: windows-latest
@@ -124,6 +126,7 @@ jobs:
           $out = $in | & "user\ROX-AI\roxai.exe" mcp
           if (-not ($out -match '"serverInfo"')) { throw "no initialize response" }
           if (-not ($out -match 'youtube_search')) { throw "tools missing" }
+          if (-not ($out -match 'playbook_search')) { throw "playbook tools missing" }
       - name: Version + update check
         shell: pwsh
         run: |

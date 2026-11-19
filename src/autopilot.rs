@@ -440,6 +440,11 @@ fn learn_inner(
             let _ = ctx.store.set("last_report", json!(now_iso()));
         }
     }
+    // the playbook: rewrite the most outdated chapter(s) from everything learned so far
+    let mut playbook = vec![];
+    if only.is_none() && !ctx.stop_file().exists() {
+        playbook = crate::playbook::learn_due(ctx, ctx.settings.playbook_chapters_per_run);
+    }
     let done = results.iter().filter(|r| r["status"] == "learned").count();
     if !queue.is_empty() {
         notify(
@@ -459,7 +464,7 @@ fn learn_inner(
             "partial"
         }
         .into(),
-        json!({"games": results, "queue": queue.len(), "completed": done}),
+        json!({"games": results, "queue": queue.len(), "completed": done, "playbook": playbook}),
     ))
 }
 

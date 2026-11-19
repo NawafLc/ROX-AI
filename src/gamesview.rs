@@ -127,6 +127,7 @@ pub fn vault_tree(ctx: &Ctx) -> Vec<(&'static str, Vec<String>)> {
     vec![
         ("Dashboard", vec!["00 Dashboard.md".to_string()]),
         ("Games", list(crate::vault::DIR_GAMES, false)),
+        ("Playbook", list(crate::vault::DIR_PLAYBOOK, false)),
         ("Insights", list(crate::vault::DIR_INSIGHTS, true)),
         ("Charts", list(crate::vault::DIR_CHARTS, true)),
         ("Genres", list(crate::vault::DIR_GENRES, false)),
