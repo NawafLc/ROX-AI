@@ -102,6 +102,20 @@ pub struct Settings {
     /// playbook chapters Claude rewrites per learning run, and how old a chapter must be to be refreshed
     pub playbook_chapters_per_run: usize,
     pub playbook_refresh_days: f64,
+    // the AI team (game building)
+    /// build games in the background
+    pub team_enabled: bool,
+    /// how many finished games the team should make (it builds them one at a time)
+    pub games_to_build: usize,
+    /// biggest game the Lead may pick: "small" or "medium" (large is off for now)
+    pub max_game_size: String,
+    /// false = one agent at a time · true = several agents at once
+    pub team_parallel: bool,
+    pub team_max_parallel: usize,
+    /// per-agent model ("opus", "sonnet", "haiku"); missing = the agent's default
+    pub agent_models: std::collections::BTreeMap<String, String>,
+    /// safety cap: agent runs per game before the Lead must wrap up
+    pub max_agent_runs_per_game: u32,
 }
 
 impl Default for Settings {
@@ -141,6 +155,13 @@ impl Default for Settings {
             avoid: String::new(),
             playbook_chapters_per_run: 1,
             playbook_refresh_days: 7.0,
+            team_enabled: false,
+            games_to_build: 1,
+            max_game_size: "medium".into(),
+            team_parallel: false,
+            team_max_parallel: 3,
+            agent_models: Default::default(),
+            max_agent_runs_per_game: 120,
         }
     }
 }

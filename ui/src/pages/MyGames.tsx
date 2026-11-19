@@ -5,7 +5,7 @@ import { FirstGame } from './Home'
 
 /** Every game the AI team has made for you. */
 export default function MyGames() {
-  const { data: games } = useApi<MyGame[]>('my_games', {}, 5000)
+  const { data: games, reload } = useApi<MyGame[]>('my_games', {}, 5000)
   const ready = (games ?? []).filter((g) => g.stage === 'ready').length
   return (
     <>
@@ -17,7 +17,7 @@ export default function MyGames() {
       ) : (
         <div className="grid grid-cols-3 gap-4">
           {games.map((g) => (
-            <GameCard key={g.id} g={g} />
+            <GameCard key={g.id} g={g} onChange={reload} />
           ))}
         </div>
       )}

@@ -106,7 +106,7 @@ impl Store {
         Ok(Guard(f))
     }
 
-    fn read<T: DeserializeOwned + Default>(&self, file: &str) -> T {
+    pub(crate) fn read<T: DeserializeOwned + Default>(&self, file: &str) -> T {
         let p = self.dir.join(file);
         match std::fs::read(&p) {
             Ok(b) if !b.is_empty() => match serde_json::from_slice(&b) {
@@ -132,7 +132,7 @@ impl Store {
     }
 
     /// Read-modify-write under the cross-process lock.
-    fn update<T: DeserializeOwned + Serialize + Default, R>(
+    pub(crate) fn update<T: DeserializeOwned + Serialize + Default, R>(
         &self,
         file: &str,
         f: impl FnOnce(&mut T) -> R,

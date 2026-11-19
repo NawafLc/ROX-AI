@@ -1,8 +1,11 @@
-import { Brain, Crown, Hammer, Palette, PencilRuler, Radar, ShieldCheck } from 'lucide-react'
+import { Activity, Box, Brain, Clapperboard, Coins, Crown, Database, Gamepad2, Hammer, Image, LayoutPanelTop, Mountain, Palette, PencilRuler, Radar, ScanSearch, ShieldCheck, Sparkles } from 'lucide-react'
 import { Agent } from '../lib/api'
 import { cx } from './ui'
 
-const ICONS: Record<string, typeof Brain> = { lead: Crown, scout: Radar, researcher: Brain, designer: PencilRuler, builder: Hammer, artist: Palette, tester: ShieldCheck }
+const ICONS: Record<string, typeof Brain> = {
+  lead: Crown, designer: PencilRuler, economy: Coins, systems: Database, gameplay: Gamepad2, ui: LayoutPanelTop, world: Mountain, qa: ShieldCheck, reviewer: ScanSearch,
+  scout: Radar, researcher: Brain, artist3d: Box, vfx: Sparkles, thumbnail: Image, promo: Clapperboard, liveops: Activity, builder: Hammer, artist: Palette, tester: ShieldCheck,
+}
 const STATE = {
   working: { dot: 'bg-brand pulse-dot text-brand', label: 'Working', text: 'text-brand' },
   idle: { dot: 'bg-sky', label: 'Ready', text: 'text-sky' },

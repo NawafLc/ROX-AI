@@ -1,6 +1,6 @@
 import { ArrowRight, CalendarCheck, Gamepad2, Hammer, Lightbulb, MessageSquare, Play, ShieldCheck, Upload, Users } from 'lucide-react'
 import { Home as HomeData, MyGame, Status, useApi } from '../lib/api'
-import { Card, Skeleton, cx } from '../components/ui'
+import { Button, Card, Skeleton, cx } from '../components/ui'
 import { AgentRow } from '../components/Team'
 import { GameCard } from '../components/GameCard'
 import { go } from '../App'
@@ -116,8 +116,11 @@ export function FirstGame() {
         <div className="min-w-0 flex-1">
           <div className="text-[20px] font-bold tracking-tight">Your first game is on its way</div>
           <div className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-ink-2">
-            Your AI team builds games here on its own. Each one shows up with screenshots, ready for you to play, give feedback and publish. Right now the team is studying the top Roblox games to learn what works.
+            Your AI team builds games here on its own. Each one shows up ready for you to play, give feedback and publish. Press Start building on the Team page and the Lead picks the first game from the market.
           </div>
+          <Button kind="primary" className="mt-4" icon={<Play className="size-4" />} onClick={() => go('team')}>
+            Open the team
+          </Button>
           <div className="mt-5 flex flex-wrap items-center gap-1.5">
             {steps.map((s, i) => (
               <div key={s.label} className="flex items-center gap-1.5">

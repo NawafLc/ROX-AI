@@ -254,6 +254,12 @@ impl Server {
     }
 
     pub fn call(&self, name: &str, a: &Value) -> Out {
+        if let Some(r) = crate::team_tools::call(&self.ctx, name, a) {
+            return match r {
+                Ok(t) => Out::text(t),
+                Err(e) => Out::err(format!("{e:#}")),
+            };
+        }
         match self.call_inner(name, a) {
             Ok(o) => o,
             Err(e) => {
@@ -799,10 +805,13 @@ impl Server {
             "ping" => ok(json!({})),
             "tools/list" => {
                 let pt = self.ctx.settings.playtesting_enabled;
-                let tools: Vec<Value> = tool_defs()
+                let mut tools: Vec<Value> = tool_defs()
                     .into_iter()
                     .filter(|t| pt || !PLAYTEST_TOOLS.contains(&t["name"].as_str().unwrap_or("")))
                     .collect();
+                if crate::team_tools::agent_id().is_some() {
+                    tools.extend(crate::team_tools::defs());
+                }
                 ok(json!({"tools": tools}))
             }
             "prompts/list" => ok(json!({"prompts": prompt_defs()})),

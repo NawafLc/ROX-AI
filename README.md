@@ -19,7 +19,11 @@ The app (version 2.1+, rebuilt with Tauri + React) has a sidebar with:
 - **Home** (opens first): your games, what each member of your AI team is doing, and a very short summary of today.
 - **My Games**: every game your team builds, with screenshots, **Play**, **Feedback** and **Publish** (the building
   parts arrive in the next milestones, see `docs/PLAN.md`).
-- **Team**: each agent with its model and live status; the chat with the Lead goes here.
+- **Team**: press **Start building** and your AI team makes games on its own: the Lead picks an idea from the market,
+  the Game Designer writes the design, the Lead plans the work, the Systems/Gameplay Scripters, UI Builder, World
+  Builder and Economy Designer build it, QA and the Code Reviewer test it (on this PC and on Roblox's servers), and
+  the Lead decides when it's ready. Chat with the Lead here; choose how many games, the biggest size, one agent at a
+  time or all at once, and which Claude model each member uses.
 - Under **Knowledge**:
   - **Playbook**: the rules your AI team builds from, in 11 chapters (ideas, core loops, first 5 minutes,
     progression & economy, monetization, retention, UI/UX, social, technical, launch & live ops, marketing). Each

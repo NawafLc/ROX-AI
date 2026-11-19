@@ -21,6 +21,8 @@ pub mod selftest;
 pub mod session;
 pub mod setup;
 pub mod store;
+pub mod team;
+pub mod team_tools;
 pub mod ui_api;
 pub mod update;
 pub mod util;

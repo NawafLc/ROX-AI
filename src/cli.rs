@@ -117,6 +117,27 @@ pub enum Cmd {
     /// Connect ROX-AI to Roblox (Open Cloud API key + private test place)
     #[command(subcommand)]
     Roblox(RobloxCmd),
+    /// The AI team that builds games
+    #[command(subcommand)]
+    Team(TeamCmd),
+}
+
+#[derive(Subcommand)]
+pub enum TeamCmd {
+    /// Build games until the requested number is done (runs in the background from the app)
+    Run {
+        /// only start if there is work and the team is switched on
+        #[arg(long)]
+        if_needed: bool,
+    },
+    /// Answer the owner's latest message as the Lead
+    Chat,
+    /// Send the Lead a message and wait for the answer
+    Say { text: String },
+    /// Show every game and the team
+    Status,
+    /// Give feedback on a game
+    Feedback { game: String, text: String },
 }
 
 #[derive(Subcommand)]
@@ -197,6 +218,10 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
             max,
             idle_wait,
         } => {
+            // the hourly check also wakes the AI team if it has work (building comes first)
+            if scheduled && ctx.settings.team_enabled && !crate::util::is_locked(&ctx.state_dir(), "studio") {
+                crate::ui_api::bg(&["team", "run", "--if-needed"]);
+            }
             let api = HttpApi::new()?;
             let wait =
                 Duration::from_secs(idle_wait.unwrap_or(if scheduled { 50 } else { 180 }) * 60);
@@ -327,6 +352,31 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
             }
             return Ok(if rep.ok { 0 } else { 1 });
         }
+        Cmd::Team(t) => match t {
+            TeamCmd::Run { if_needed } => {
+                if if_needed && (!ctx.settings.team_enabled || crate::util::is_locked(&ctx.state_dir(), "studio")) {
+                    print("nothing to do");
+                    return Ok(0);
+                }
+                print(pretty(&crate::team::run(ctx)?));
+            }
+            TeamCmd::Chat => crate::team::chat_reply(ctx)?,
+            TeamCmd::Say { text } => {
+                crate::team::chat_push(ctx, "owner", &text)?;
+                crate::team::chat_reply(ctx)?;
+                print(crate::team::chat(ctx).last().map(|m| m.text.clone()).unwrap_or_default());
+            }
+            TeamCmd::Status => {
+                print(crate::team::studio_summary(ctx));
+                for a in crate::team::agents_json(ctx) {
+                    print(format!("{:<18} {:<8} {}", a["name"].as_str().unwrap_or(""), a["model"].as_str().unwrap_or(""), a["text"].as_str().unwrap_or("")));
+                }
+            }
+            TeamCmd::Feedback { game, text } => {
+                crate::team::add_feedback(ctx, &game, &text)?;
+                print("Feedback filed.");
+            }
+        },
         Cmd::Roblox(r) => match r {
             RobloxCmd::Connect { place } => {
                 let mut key = String::new();

@@ -100,7 +100,7 @@ export function ago(iso: string | null | undefined): string {
 }
 
 export type AgentState = 'working' | 'idle' | 'paused' | 'soon'
-export type Agent = { id: string; name: string; role: string; model: string; state: AgentState; text: string; since?: string | null }
+export type Agent = { id: string; name: string; role: string; model: string; model_id?: string; default_model?: string; active?: boolean; state: AgentState; text: string; since?: string | null }
 export type Home = {
   summary: string[]
   learned_today: number
@@ -116,9 +116,43 @@ export type MyGame = {
   id: string
   title: string
   genre: string
-  stage: 'idea' | 'building' | 'testing' | 'ready' | 'published'
+  stage: 'idea' | 'building' | 'testing' | 'ready' | 'published' | 'failed'
+  pitch?: string
+  summary?: string
   progress: number
   stage_text: string
   thumb?: string | null
   updated?: string
 }
+
+export type Entry = { at: string; by: string; text: string; why?: string }
+export type TeamTask = { id: string; title: string; owner: string }
+export type Team = {
+  enabled: boolean
+  running: boolean
+  paused_until: string | null
+  claude_ready: boolean
+  blocked: string | null
+  roblox_connected: boolean
+  agents: Agent[]
+  current: {
+    slug: string
+    title: string
+    pitch: string
+    genre: string
+    art_style: string
+    size: string
+    stage: string
+    stage_text: string
+    progress: number
+    done: number
+    total: number
+    doing: TeamTask[]
+    activity: Entry[]
+  } | null
+  ready: number
+  games_to_build: number
+  parallel: boolean
+  max_game_size: string
+}
+export type ChatMsg = { from: 'owner' | 'lead'; text: string; at: string }

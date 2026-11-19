@@ -106,7 +106,42 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
         }
         "games" => games_json(&c),
         "home" => home_json(&c),
-        "my_games" => c.store.get("my_games").unwrap_or(json!([])),
+        "my_games" => crate::team::my_games_json(&c),
+        "my_game" => crate::team::game_json(&c, &s(&a, "id"))?,
+        "team" => team_json(&c),
+        "team_start" => {
+            c.settings.team_enabled = true;
+            c.settings.save(&c.home)?;
+            crate::session::clear_stop(&c);
+            let _ = c.store.set("team_paused_until", Value::Null);
+            if !crate::util::is_locked(&c.state_dir(), "studio") {
+                bg(&["team", "run"]);
+            }
+            json!({"ok": true})
+        }
+        "team_pause" => {
+            // the current agent finishes its step, then the team stops
+            c.settings.team_enabled = false;
+            c.settings.save(&c.home)?;
+            json!({"ok": true})
+        }
+        "chat" => json!({"messages": crate::team::chat(&c), "typing": crate::util::is_locked(&c.state_dir(), "lead-chat")}),
+        "chat_send" => {
+            let text = s(&a, "text");
+            if text.trim().is_empty() {
+                bail!("empty message");
+            }
+            crate::team::chat_push(&c, "owner", &text)?;
+            bg(&["team", "chat"]);
+            json!({"ok": true})
+        }
+        "game_feedback" => {
+            crate::team::add_feedback(&c, &s(&a, "id"), &s(&a, "text"))?;
+            if c.settings.team_enabled && !crate::util::is_locked(&c.state_dir(), "studio") {
+                bg(&["team", "run"]);
+            }
+            json!({"ok": true})
+        }
         "game" => game_json(&c, u(&a, "uid").ok_or_else(|| anyhow!("uid required"))?)?,
         "icon" => icon(&c, u(&a, "uid").unwrap_or(0)),
         "vault_image" => vault_image(&c, &s(&a, "path")),
@@ -294,6 +329,33 @@ fn enqueue(items: Vec<(String, Action)>) {
     });
 }
 
+/// The Team page: every agent, the game being built, and how the team is set up.
+fn team_json(c: &Ctx) -> Value {
+    let cur = crate::team::current(c).map(|(_, s)| {
+        let (stage, text, p) = crate::team::stage_of(&s);
+        let doing: Vec<Value> = s.tasks.iter().filter(|t| t.status == "doing").map(|t| json!({"id": t.id, "title": t.title, "owner": t.owner})).collect();
+        let (d, t) = s.progress();
+        json!({"slug": s.game.slug, "title": s.game.title, "pitch": s.game.pitch, "genre": s.game.genre, "art_style": s.game.art_style, "size": s.game.size,
+            "stage": stage, "stage_text": text, "progress": (p * 100.0).round(), "done": d, "total": t, "doing": doing,
+            "activity": s.activity.iter().rev().take(12).collect::<Vec<_>>()})
+    });
+    let ready = crate::team::all_games(c).iter().filter(|(_, s)| s.game.status == "ready").count();
+    json!({
+        "enabled": c.settings.team_enabled,
+        "running": crate::util::is_locked(&c.state_dir(), "studio"),
+        "paused_until": crate::team::paused_until(c),
+        "claude_ready": crate::autopilot::find_claude(c).is_some(),
+        "blocked": crate::autopilot::blocked(c),
+        "roblox_connected": crate::cloud::connection(c).is_some(),
+        "agents": crate::team::agents_json(c),
+        "current": cur,
+        "ready": ready,
+        "games_to_build": c.settings.games_to_build,
+        "parallel": c.settings.team_parallel,
+        "max_game_size": c.settings.max_game_size,
+    })
+}
+
 /// Settings → Roblox connection: the test place, the build tools and the last pipeline run. Never the key.
 fn roblox_status(c: &Ctx) -> Value {
     let running = crate::util::is_locked(&c.state_dir(), "pipeline");
@@ -411,9 +473,6 @@ fn home_json(c: &Ctx) -> Value {
     } else {
         json!({"state": "idle", "text": if charts_today { "Today's charts are in" } else { "Updates the charts daily" }, "since": last_scan})
     };
-    let soon = |id: &str, name: &str, role: &str, model: &str| json!({"id": id, "name": name, "role": role, "model": model, "state": "soon", "text": "Joins when game building arrives"});
-    let mut lead = soon("lead", "Lead", "Comes up with ideas and runs the team", "Opus 5.5");
-    lead["text"] = json!("Joins when game building arrives");
     let mut s1 = scout;
     s1["id"] = json!("scout");
     s1["name"] = json!("Scout");
@@ -424,15 +483,10 @@ fn home_json(c: &Ctx) -> Value {
     r1["name"] = json!("Researcher");
     r1["role"] = json!("Learns how top games work");
     r1["model"] = json!(model_name(&c.settings.claude_model));
-    let agents = vec![
-        lead,
-        s1,
-        r1,
-        soon("designer", "Designer", "Turns ideas into a game plan", "Sonnet 5.5"),
-        soon("builder", "Builder", "Writes the game in Roblox", "Sonnet 5.5"),
-        soon("artist", "Artist", "Makes maps, art and thumbnails", "Sonnet 5.5"),
-        soon("tester", "Tester", "Plays and checks every build", "Haiku 5.5"),
-    ];
+    // the game-building team (active members), then the market research pair
+    let mut agents: Vec<Value> = crate::team::agents_json(c).into_iter().filter(|a| a["active"] == true).collect();
+    agents.push(s1);
+    agents.push(r1);
     json!({
         "summary": summary,
         "learned_today": learned_today, "new_today": new_today, "charts_today": charts_today,

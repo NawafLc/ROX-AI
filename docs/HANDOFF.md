@@ -85,8 +85,28 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   few minutes and then tell the owner to close Studio. Agents never need Studio open.
 - Dev builds (exe under `target\`) skip Windows registration in `setup::ensure`, so interface previews never take
   over the real app's schedule or Claude connections (`ROXAI_DEV_REGISTER=1` forces it).
-- **Next: M3 agent team** (Lead + core agents, task board, models per agent, Lead chat, first small game end to end),
-  then M4 Market ideas, M5 invisible Studio + My Games Play/Feedback/Publish, M6 Create + Library, M7 Live ops,
+- **M3 agent team: built, unit-tested; first real game run pending** (Claude Code on the PC was signed out —
+  "OAuth session expired"; the owner must sign in again, then run the first game end to end).
+  - `team.rs`: roster of 15 (9 active: lead, designer, economy, systems, gameplay, ui, world, qa, reviewer; the rest
+    "join later"), default model aliases per agent (`opus`/`sonnet`/`haiku`, setting `agent_models` overrides).
+    Board per game in `<game>\.roxai\studio.json` (locked store): game info, tasks (kind design/plan/work/fix/qa/
+    review/final/feedback, owner, done_when, deps, attempts ≤3), decisions, activity, owner feedback, verdict.
+    Orchestrator `team::run` (lock `studio`): Lead ideates → `game_create` → Designer writes design.md → Lead plans
+    tasks → specialists (one at a time, or one task per owner in parallel up to `team_max_parallel`) → local build
+    after each batch (failure = fix task; 6 failed fix rounds or `max_agent_runs_per_game` = stopped) → QA + code
+    review → Lead's final review → `game_verdict` → final test on Roblox's servers → ready + toast. Owner feedback
+    adds a Lead "feedback" task and resumes building. Usage limit = 60 min break (`team_paused_until`).
+  - `team_tools.rs`: MCP tools only present in agent sessions (env `ROXAI_AGENT`, `ROXAI_GAME`), sandboxed to the
+    game folder (`safe_path`: no absolute/`..`/hidden/`build`): board, project_files/read/write/edit/delete/search,
+    project_build, project_test, task_add/update, decision; Lead also game_create, game_verdict, game_feedback,
+    team_settings. Agents get no built-in file or shell tools, so they can never reach the Roblox key.
+  - Lead chat: `chat_send` → `roxai team chat` (lock `lead-chat`) replies as the Lead. CLI: `roxai team run
+    [--if-needed]|chat|say "<text>"|status|feedback <game> "<text>"`. The hourly scheduled check wakes the team;
+    learning skips while the team builds (building comes first).
+  - App: Team page (Start building / Pause, game in progress with live tasks + activity, Lead chat, games to build,
+    size cap small/medium (large off), pace one-at-a-time/all-at-once, member cards with model picker), My Games
+    cards with the Lead's summary and a working Feedback box (Play/Publish arrive in M5).
+- Then M4 Market ideas, M5 invisible Studio + My Games Play/Feedback/Publish, M6 Create + Library, M7 Live ops,
   M8 Promo, M9 iPhone.
 
 ## Known notes

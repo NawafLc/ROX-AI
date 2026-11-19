@@ -109,39 +109,98 @@ pub struct ClaudeRun {
 }
 
 pub fn run_claude(ctx: &Ctx, prompt: &str, timeout: Duration, tag: &str) -> Result<ClaudeRun> {
+    run_claude_opts(
+        ctx,
+        prompt,
+        &ClaudeOpts { model: ctx.settings.claude_model.clone(), timeout, tag: tag.to_string(), ..ClaudeOpts::new(ctx) },
+    )
+}
+
+/// How to run one headless Claude Code session.
+#[derive(Clone, Debug)]
+pub struct ClaudeOpts {
+    /// "" = the account default; otherwise an alias ("opus", "sonnet", "haiku") or a full model id
+    pub model: String,
+    pub tools: String,
+    /// extra environment for ROX-AI's MCP server (e.g. which game an agent works on)
+    pub mcp_env: Vec<(String, String)>,
+    pub timeout: Duration,
+    pub tag: String,
+    pub max_turns: u32,
+    /// working folder (holds the CLAUDE.md the session reads); None = the learning autopilot's
+    pub workdir: Option<PathBuf>,
+}
+
+impl ClaudeOpts {
+    pub fn new(ctx: &Ctx) -> ClaudeOpts {
+        ClaudeOpts {
+            model: String::new(),
+            tools: "mcp__roxai,WebSearch,WebFetch".into(),
+            mcp_env: vec![],
+            timeout: Duration::from_secs(30 * 60),
+            tag: "run".into(),
+            max_turns: ctx.settings.max_turns,
+            workdir: None,
+        }
+    }
+}
+
+fn mcp_config_with(ctx: &Ctx, env: &[(String, String)], tag: &str) -> Result<PathBuf> {
+    if env.is_empty() {
+        return mcp_config(ctx);
+    }
+    let mut entry = mcp_entry(ctx);
+    for (k, v) in env {
+        entry["env"][k] = json!(v);
+    }
+    let p = ctx.state_dir().join(format!("mcp-{tag}.json"));
+    crate::util::atomic_write(&p, serde_json::to_string_pretty(&json!({"mcpServers": {"roxai": entry}}))?.as_bytes())?;
+    Ok(p)
+}
+
+pub fn run_claude_opts(ctx: &Ctx, prompt: &str, o: &ClaudeOpts) -> Result<ClaudeRun> {
     let Some(claude) = find_claude(ctx) else {
-        bail!("Claude Code CLI not found — run INSTALL.bat again")
+        bail!("Claude Code isn't installed — Settings → Run setup")
     };
-    let s = &ctx.settings;
+    let (timeout, tag) = (o.timeout, o.tag.as_str());
     let log = ctx.logs_dir().join(format!(
         "claude-{}-{tag}.json",
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     ));
+    let mcp = mcp_config_with(ctx, &o.mcp_env, tag)?;
     let mut cmd = hidden_command(&claude);
+    // the prompt goes in on stdin (no command-line length limit)
     cmd.args([
         "-p",
-        prompt,
         "--mcp-config",
-        &mcp_config(ctx)?.to_string_lossy(),
+        &mcp.to_string_lossy(),
         "--strict-mcp-config",
         "--allowedTools",
-        "mcp__roxai,WebSearch,WebFetch",
+        &o.tools,
         "--output-format",
         "json",
         "--max-turns",
-        &s.max_turns.to_string(),
+        &o.max_turns.to_string(),
     ]);
-    if !s.claude_model.is_empty() {
-        cmd.args(["--model", &s.claude_model]);
+    if !o.model.is_empty() {
+        cmd.args(["--model", &o.model]);
     }
     let f = std::fs::File::create(&log)?;
-    cmd.current_dir(workdir(ctx)?)
+    let wd = match &o.workdir {
+        Some(d) => d.clone(),
+        None => workdir(ctx)?,
+    };
+    cmd.current_dir(wd)
         .env("ROXAI_HOME", &ctx.home)
-        .stdin(std::process::Stdio::null())
+        .stdin(std::process::Stdio::piped())
         .stdout(f.try_clone()?)
         .stderr(f);
     crate::info!("starting claude for {tag} (timeout {}s)", timeout.as_secs());
     let mut child = cmd.spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(prompt.as_bytes());
+    }
     let start = Instant::now();
     let mut stopped = None;
     let code = loop {
@@ -197,6 +256,9 @@ pub fn run_claude(ctx: &Ctx, prompt: &str, timeout: Duration, tag: &str) -> Resu
         "not logged in",
         "authentication_error",
         "oauth token",
+        "failed to authenticate",
+        "oauth session expired",
+        "could not be refreshed",
     ]
     .iter()
     .any(|k| low.contains(k));
@@ -321,6 +383,9 @@ fn learn_inner(
 ) -> Result<(String, Value)> {
     if !ctx.is_active() && only.is_none() {
         bail!("SKIP: passive mode — only chart data is collected");
+    }
+    if only.is_none() && crate::util::is_locked(&ctx.state_dir(), "studio") {
+        bail!("SKIP: the team is building a game (building comes first)");
     }
     clear_stop(ctx);
     if !force && only.is_none() {
