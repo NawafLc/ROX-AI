@@ -418,7 +418,14 @@ fn run_task(ctx: &Ctx, dir: &Path, task_id: &str) -> Result<()> {
     })?;
     let status = format!("{} · {}", t.id, t.title);
     let res = run_agent(ctx, Some(dir), &t.owner, &mission(&t, &s), &status);
+    // a usage limit or sign-in problem is not the task's fault: it doesn't use up an attempt
+    let not_its_fault = matches!(&res, Err(e) if { let m = format!("{e:#}"); m.contains("USAGE:") || m.contains("sign in") });
     update(dir, |s| {
+        if not_its_fault {
+            if let Some(x) = s.tasks.iter_mut().find(|x| x.id == t.id) {
+                x.attempts = x.attempts.saturating_sub(1);
+            }
+        }
         let attempts_left = s.tasks.iter().find(|x| x.id == t.id).map(|x| x.attempts < 3).unwrap_or(false);
         if let Some(x) = s.tasks.iter_mut().find(|x| x.id == t.id) {
             if x.status == "doing" {

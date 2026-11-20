@@ -262,7 +262,7 @@ pub fn run_claude_opts(ctx: &Ctx, prompt: &str, o: &ClaudeOpts) -> Result<Claude
     ]
     .iter()
     .any(|k| low.contains(k));
-    r.usage_limit = ["usage limit", "rate_limit", "limit reached"]
+    r.usage_limit = ["usage limit", "rate_limit", "limit reached", "session limit", "weekly limit", "hit your limit", "\"api_error_status\":429"]
         .iter()
         .any(|k| low.contains(k));
     Ok(r)
