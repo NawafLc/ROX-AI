@@ -68,6 +68,19 @@ pub fn agent(id: &str) -> Option<&'static AgentDef> {
     AGENTS.iter().find(|a| a.id == id)
 }
 
+/// How hard an agent thinks on a kind of work. Deep thinking where mistakes are expensive (the design, the plan,
+/// fixing a broken build, reviews, the owner's feedback); normal for building from a clear spec.
+pub fn effort_for(ctx: &Ctx, id: &str, kind: &str) -> String {
+    if let Some(e) = ctx.settings.agent_effort.get(id).filter(|e| matches!(e.as_str(), "low" | "medium" | "high")) {
+        return e.clone();
+    }
+    match kind {
+        "design" | "plan" | "final" | "feedback" | "fix" | "ideate" | "review" => "high",
+        _ => "medium",
+    }
+    .into()
+}
+
 pub fn model_for(ctx: &Ctx, id: &str) -> String {
     ctx.settings
         .agent_models
@@ -344,7 +357,7 @@ fn prompt_for(ctx: &Ctx, a: &AgentDef, s: Option<&Studio>, mission: &str) -> Str
 }
 
 /// Run one agent session. Returns a one-line outcome for the log.
-pub fn run_agent(ctx: &Ctx, dir: Option<&Path>, agent_id: &str, mission: &str, status_text: &str) -> Result<String> {
+pub fn run_agent(ctx: &Ctx, dir: Option<&Path>, agent_id: &str, kind: &str, mission: &str, status_text: &str) -> Result<String> {
     let a = agent(agent_id).ok_or_else(|| anyhow!("unknown agent {agent_id}"))?;
     let s = dir.map(load);
     let slug = s.as_ref().map(|s| s.game.slug.clone()).unwrap_or_default();
@@ -360,6 +373,7 @@ pub fn run_agent(ctx: &Ctx, dir: Option<&Path>, agent_id: &str, mission: &str, s
         // only the Lead researches the market on the web; builders work purely through the project tools
         tools: if agent_id == "lead" { "mcp__roxai,WebSearch,WebFetch".into() } else { "mcp__roxai".into() },
         builtin: if agent_id == "lead" { "WebSearch,WebFetch".into() } else { String::new() },
+        effort: effort_for(ctx, agent_id, kind),
     };
     set_now(ctx, agent_id, Some((&slug, status_text)));
     if let Some(d) = dir {
@@ -419,7 +433,7 @@ fn run_task(ctx: &Ctx, dir: &Path, task_id: &str) -> Result<()> {
         }
     })?;
     let status = format!("{} · {}", t.id, t.title);
-    let res = run_agent(ctx, Some(dir), &t.owner, &mission(&t, &s), &status);
+    let res = run_agent(ctx, Some(dir), &t.owner, &t.kind, &mission(&t, &s), &status);
     // a usage limit or sign-in problem is not the task's fault: it doesn't use up an attempt
     let not_its_fault = matches!(&res, Err(e) if { let m = format!("{e:#}"); m.contains("USAGE:") || m.contains("sign in") });
     update(dir, |s| {
@@ -669,7 +683,7 @@ fn ideate(ctx: &Ctx) -> Result<()> {
         Games already made (don't repeat them): {}.",
         if done.is_empty() { "none yet".to_string() } else { done.join(", ") }
     );
-    run_agent(ctx, None, "lead", &mission, "Picking the next game to build")?;
+    run_agent(ctx, None, "lead", "ideate", &mission, "Picking the next game to build")?;
     Ok(())
 }
 
@@ -806,7 +820,7 @@ pub fn chat_reply(ctx: &Ctx) -> Result<()> {
         Your final message is sent to the owner as your reply.",
         studio_summary(ctx)
     );
-    let r = run_agent(ctx, cur.as_ref().map(|(d, _)| d.as_path()), "lead", &mission, "Answering you");
+    let r = run_agent(ctx, cur.as_ref().map(|(d, _)| d.as_path()), "lead", "chat", &mission, "Answering you");
     let text = match r {
         Ok(_) => {
             // run_agent returns the last line; read the full final message from the log

@@ -125,6 +125,8 @@ pub struct ClaudeOpts {
     /// Claude Code's own built-in tools the session gets at all ("" = none). Fewer tools = a smaller prompt every
     /// turn, and the session can't touch files or run commands outside ROX-AI's tools.
     pub builtin: String,
+    /// thinking effort ("" = the account default). Thinking is most of an agent's output and stays in its context.
+    pub effort: String,
     /// extra environment for ROX-AI's MCP server (e.g. which game an agent works on)
     pub mcp_env: Vec<(String, String)>,
     pub timeout: Duration,
@@ -140,6 +142,7 @@ impl ClaudeOpts {
             model: String::new(),
             tools: "mcp__roxai,WebSearch,WebFetch".into(),
             builtin: "WebSearch,WebFetch".into(),
+            effort: String::new(),
             mcp_env: vec![],
             timeout: Duration::from_secs(30 * 60),
             tag: "run".into(),
@@ -190,6 +193,9 @@ pub fn run_claude_opts(ctx: &Ctx, prompt: &str, o: &ClaudeOpts) -> Result<Claude
     ]);
     if !o.model.is_empty() {
         cmd.args(["--model", &o.model]);
+    }
+    if !o.effort.is_empty() {
+        cmd.args(["--effort", &o.effort]);
     }
     let f = std::fs::File::create(&log)?;
     let wd = match &o.workdir {

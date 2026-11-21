@@ -119,7 +119,9 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
 - Token economy: agent sessions get no built-in tools (`--tools ""`; the Lead and learning runs keep only
   WebSearch/WebFetch), MCP tools load up front (`ENABLE_TOOL_SEARCH=false`). `board` is compact (finished tasks one
   line, others' text cut), `project_read` ≤ 400 lines, `project_outline` (file skeleton with line numbers),
-  `project_search` ≤ 60 hits with `path` filter. The rulebook has a "Work economy" section. On the first game the
+  `project_search` ≤ 60 hits with `path` filter. The rulebook has a "Work economy" section. Thinking effort per
+  task (`team::effort_for`): high for design/plan/fix/review/final/feedback/ideas, medium for normal building
+  (setting `agent_effort` overrides per agent). Thinking was ~95% of an agent's output and stays in its context. On the first game the
   board was 73k chars and file reads were 59% of all tool output; the agents' own context re-reads dominate usage.
 - Progress: `team::estimate` = average real task time (from the activity log) × open tasks + QA/review/final, shown
   as a bar with % and "about X left · done around HH:MM" (Team page, My Games, `roxai team status`, Lead chat).

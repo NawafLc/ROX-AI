@@ -114,6 +114,8 @@ pub struct Settings {
     pub team_max_parallel: usize,
     /// per-agent model ("opus", "sonnet", "haiku"); missing = the agent's default
     pub agent_models: std::collections::BTreeMap<String, String>,
+    /// per-agent thinking effort ("low", "medium", "high"); missing = by task (deep for design, planning, fixes, reviews)
+    pub agent_effort: std::collections::BTreeMap<String, String>,
     /// safety cap: agent runs per game before the Lead must wrap up
     pub max_agent_runs_per_game: u32,
 }
@@ -161,6 +163,7 @@ impl Default for Settings {
             team_parallel: false,
             team_max_parallel: 3,
             agent_models: Default::default(),
+            agent_effort: Default::default(),
             max_agent_runs_per_game: 120,
         }
     }
