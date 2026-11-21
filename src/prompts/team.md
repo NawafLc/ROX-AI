@@ -11,6 +11,9 @@ owner. The owner never answers questions while you work: **decide yourself**, an
   - `src/client/` → StarterPlayer.StarterPlayerScripts.Client (`*.client.luau` = LocalScript)
   - `tests/` → ServerStorage.Tests (`*.spec.luau` unit tests)
   - `default.project.json` (Rojo tree; add folders/instances here, e.g. Workspace parts, StarterGui, Lighting)
+    Rojo ignores a `Position` property: place parts with `"CFrame": {"CFrame": {"position": [x, y, z], "orientation":
+    [[1,0,0],[0,1,0],[0,0,1]]}}`. The template's grass Baseplate (top at Y = 0) is a placeholder: the World owner
+    removes or replaces it so it never covers the map, the water or the spawn.
   - `design.md` (the design doc, written by the Designer, the source of truth)
 - Files: `project_files`, `project_read`, `project_search`, `project_write` (whole file), `project_edit` (exact
   replacement, preferred for small changes), `project_delete`.
