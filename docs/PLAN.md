@@ -108,7 +108,7 @@ Decided together, point by point. Personal use for now; the parts that would cha
 | M0 ✅ | New UI foundation (Tauri), design system, move existing screens | Look at screenshots, say what you think |
 | M1 ✅ | Playbook v1: chapters, benchmarks, devlog learning, search tool | — |
 | M2 ✅ | Headless build pipeline: Rojo, Lune, project template, test place + Luau Execution tests | **Open Cloud API key** (one-time), **access to your PC** for testing |
-| M3 🔧 | Agent team v1: Lead + core agents, task board, models, parallel/one-at-a-time, Lead chat; first small game end to end | PC access |
+| M3 ✅ | Agent team v1: Lead + core agents, task board, models, parallel/one-at-a-time, Lead chat; first small game end to end | PC access |
 | M4 | Market: all charts, trends, pitches, scoring, avoid list, size cap, game count | — |
 | M5 | Invisible Studio: screenshots, visual QA; My Games gallery, Play, Feedback loop, Publish | PC access |
 | M6 | Create + Library: Blender, VFX, thumbnails, library with safety filter | — |

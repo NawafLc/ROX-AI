@@ -85,8 +85,10 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   few minutes and then tell the owner to close Studio. Agents never need Studio open.
 - Dev builds (exe under `target\`) skip Windows registration in `setup::ensure`, so interface previews never take
   over the real app's schedule or Claude connections (`ROXAI_DEV_REGISTER=1` forces it).
-- **M3 agent team: built, unit-tested; first real game run pending** (Claude Code on the PC was signed out —
-  "OAuth session expired"; the owner must sign in again, then run the first game end to end).
+- **M3 agent team: done.** First game, *Skip a Stone!*, built end to end on 2026-11-21 (46 tasks; 359 local +
+  427 Roblox-server tests green; Lead verdict "ready"). The owner tests it before the team starts another game
+  (team switched off). Still owner-side: create the 9 passes / 30 products on the published place and paste
+  the ids (`monetization-ids.md` in the game folder; ids stay 0 until then, which sells nothing).
   - `team.rs`: roster of 15 (9 active: lead, designer, economy, systems, gameplay, ui, world, qa, reviewer; the rest
     "join later"), default model aliases per agent (`opus`/`sonnet`/`haiku`, setting `agent_models` overrides).
     Board per game in `<game>\.roxai\studio.json` (locked store): game info, tasks (kind design/plan/work/fix/qa/
