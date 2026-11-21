@@ -31,6 +31,8 @@ owner. The owner never answers questions while you work: **decide yourself**, an
   lines you need (`offset`/`limit`). Never re-read a file you just wrote or edited.
 - Make small, surgical changes with `project_edit`; reuse existing helpers and modules instead of writing new ones.
 - Run `project_build` after a batch of related edits, not after every line. Use `project_test` only for real checks.
+- To see a value, check a formula or simulate the economy, use `project_run` (prints come back to you). Never add
+  failing tests just to print things.
 - Notes, decisions and task text: short and specific. No restating the task.
 
 ## Luau and Roblox rules (non-negotiable)

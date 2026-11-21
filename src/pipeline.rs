@@ -17,6 +17,7 @@ pub const TOOLS: [(&str, &str, &str); 2] = [("rojo", "rojo-rbx/rojo", "7.7.1"), 
 
 const HARNESS: &str = include_str!("luau/harness.luau");
 const CHECK: &str = include_str!("luau/check.luau");
+const RUN: &str = include_str!("luau/run.luau");
 const REMOTE: &str = include_str!("luau/remote.luau");
 
 /// The starter project every new game begins from: (path inside the project, contents).
@@ -341,6 +342,40 @@ fn finish(ctx: &Ctx, dir: &Path, mut rep: Report) -> Result<Report> {
 }
 
 /// Builds and tests the starter project end to end: proves the whole pipeline works on this PC.
+/// Build the place and run one Luau snippet against it on this PC; returns what it printed.
+pub fn run_snippet(ctx: &Ctx, dir: &Path, code: &str) -> Result<String> {
+    let _lock = crate::util::single_instance(&ctx.state_dir(), "pipeline")?;
+    let dir = PathBuf::from(dir.canonicalize()?.to_string_lossy().trim_start_matches(r"\\?\").to_string());
+    let rojo = tool_path(ctx, "rojo").ok_or_else(|| anyhow!("Rojo missing: run project_build once"))?;
+    let lune = tool_path(ctx, "lune").ok_or_else(|| anyhow!("Lune missing: run project_build once"))?;
+    let build = dir.join("build");
+    std::fs::create_dir_all(&build)?;
+    let place = build.join("run.rbxl");
+    let (code_r, text) = crate::util::run_capture(&rojo.to_string_lossy(), &["build", &dir.to_string_lossy(), "--output", &place.to_string_lossy()], Duration::from_secs(300))?;
+    if code_r != 0 || !place.is_file() {
+        bail!("Rojo couldn't build the place:
+{}", tail(&text, 12));
+    }
+    let snippet = build.join("snippet.luau");
+    std::fs::write(&snippet, code)?;
+    let run = script_file(ctx, "run.luau", RUN)?;
+    let (_, text) = crate::util::run_capture(&lune.to_string_lossy(), &["run", &run.to_string_lossy(), &place.to_string_lossy(), &snippet.to_string_lossy()], Duration::from_secs(120))?;
+    let line = text.lines().find_map(|l| l.trim().strip_prefix("ROXAI_RUN ")).ok_or_else(|| anyhow!("the snippet didn't finish (endless loop?):
+{}", tail(&text, 12)))?;
+    let v: Value = serde_json::from_str(line)?;
+    let out = v["output"].as_str().unwrap_or("").to_string();
+    let mut s = if out.is_empty() { "(nothing printed)".to_string() } else { out };
+    if v["cut"].as_bool() == Some(true) {
+        s.push_str("
+(output cut at 20 KB: print less)");
+    }
+    if v["ok"].as_bool() != Some(true) {
+        s.push_str(&format!("
+ERROR: {}", v["error"].as_str().unwrap_or("?")));
+    }
+    Ok(s)
+}
+
 pub fn selftest(ctx: &Ctx, report: crate::deps::Report) -> Result<Report> {
     let dir = games_dir(ctx).join("_pipeline-check");
     let _ = std::fs::remove_dir_all(&dir);

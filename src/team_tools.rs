@@ -32,6 +32,7 @@ pub fn defs() -> Vec<Value> {
           obj(json!({"path": s, "old": s, "new": s, "replace_all": {"type": "boolean"}}), &["path", "old", "new"])),
         t("project_delete", "Delete a project file.", obj(json!({"path": s}), &["path"])),
         t("project_search", "Search project files for text (case-insensitive). Returns path:line: text (up to 60 hits). path = only files whose path contains this text.", obj(json!({"query": s, "path": s}), &["query"])),
+        t("project_run", "Run a Luau snippet on this PC against the freshly built game and get what it prints (and its return value). require any ModuleScript, e.g. local C = require(game.ReplicatedStorage.Shared.Config). For quick checks, numbers and economy simulations; it changes no files. Never write failing tests just to print values.", obj(json!({"code": s}), &["code"])),
         t("project_build", "Build the place with Rojo, compile every script and run the unit tests (this PC). Run it after every change.", obj(json!({}), &[])),
         t("project_test", "Build, upload to the private test place and run all tests (including remoteOnly specs) on Roblox's servers, with the server output. Slower and rate limited: use it for real checks.", obj(json!({}), &[])),
         t("task_add", "Add a task to the board. owner: lead, designer, economy, systems, gameplay, ui, world, qa, reviewer.",
@@ -328,6 +329,20 @@ fn game_tool(ctx: &Ctx, me: &str, dir: &Path, name: &str, a: &Value) -> Result<S
                 format!("{}\n(more matches: narrow the query or pass path)", hits.join("\n"))
             } else {
                 hits.join("\n")
+            }
+        }
+        "project_run" => {
+            let code = arg(a, "code");
+            if code.trim().is_empty() {
+                bail!("code is empty");
+            }
+            // wait for a build that's running (another agent's) instead of failing
+            let t0 = std::time::Instant::now();
+            loop {
+                match crate::pipeline::run_snippet(ctx, dir, code) {
+                    Err(e) if e.to_string().contains("already running") && t0.elapsed().as_secs() < 600 => std::thread::sleep(std::time::Duration::from_secs(3)),
+                    r => break r?,
+                }
             }
         }
         "project_build" => {
