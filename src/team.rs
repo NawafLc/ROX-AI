@@ -391,7 +391,11 @@ pub fn run_agent(ctx: &Ctx, dir: Option<&Path>, agent_id: &str, kind: &str, miss
         bail!("Claude needs you to sign in again");
     }
     if r.usage_limit {
-        let until = (chrono::Utc::now() + chrono::Duration::minutes(60)).to_rfc3339();
+        // Wait until Claude says the limit lifts (+2 min); a retry is cheap, so without a time try again in 15 min.
+        let until = r.limit_reset
+            .map(|t| t + chrono::Duration::minutes(2))
+            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::minutes(15))
+            .to_rfc3339();
         let _ = ctx.store.set("team_paused_until", json!(until));
         bail!("USAGE: Claude usage limit reached — the team takes a break and continues by itself");
     }

@@ -95,7 +95,7 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
     tasks → specialists (one at a time, or one task per owner in parallel up to `team_max_parallel`) → local build
     after each batch (failure = fix task; 6 failed fix rounds or `max_agent_runs_per_game` = stopped) → QA + code
     review → Lead's final review → `game_verdict` → final test on Roblox's servers → ready + toast. Owner feedback
-    adds a Lead "feedback" task and resumes building. Usage limit = 60 min break (`team_paused_until`).
+    adds a Lead "feedback" task and resumes building. Usage limit = break until the reset time Claude names (+2 min; 15 min if it names none) (`team_paused_until`).
   - `team_tools.rs`: MCP tools only present in agent sessions (env `ROXAI_AGENT`, `ROXAI_GAME`), sandboxed to the
     game folder (`safe_path`: no absolute/`..`/hidden/`build`): board, project_files/read/write/edit/delete/search,
     project_build, project_test, task_add/update, decision; Lead also game_create, game_verdict, game_feedback,
@@ -110,7 +110,7 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   M8 Promo, M9 iPhone.
 
 ## Running the team for real (learned on the first game)
-- Claude usage limits: agent runs that hit one pause the team (`team_paused_until`, 60 min); the `team run` process
+- Claude usage limits: agent runs that hit one pause the team (`team_paused_until`, until the "resets 5:40pm" time Claude gives +2 min, else 15 min); the `team run` process
   waits it out itself (PC kept awake by `util::KeepAwake`) and doesn't use up task attempts. The hourly Learning
   task repeats all day (P1D) as a backup; `setup::ensure` re-creates tasks when the `sched2` suffix changes.
 - Sign-in: the shared Claude Code login kept expiring between runs (other Claude apps refresh it). Team page →

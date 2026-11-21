@@ -106,6 +106,9 @@ pub struct ClaudeRun {
     pub log: String,
     pub auth_problem: bool,
     pub usage_limit: bool,
+    /// When Claude says the usage limit lifts (if it said)
+    #[serde(skip)]
+    pub limit_reset: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub fn run_claude(ctx: &Ctx, prompt: &str, timeout: Duration, tag: &str) -> Result<ClaudeRun> {
@@ -283,7 +286,41 @@ pub fn run_claude_opts(ctx: &Ctx, prompt: &str, o: &ClaudeOpts) -> Result<Claude
     r.usage_limit = ["usage limit", "rate_limit", "limit reached", "session limit", "weekly limit", "hit your limit", "\"api_error_status\":429"]
         .iter()
         .any(|k| low.contains(k));
+    if r.usage_limit {
+        r.limit_reset = limit_reset(&raw);
+    }
     Ok(r)
+}
+
+/// When Claude says the limit lifts ("… limit · resets 5:40pm (Asia/Riyadh)"), as the next such time on this PC's
+/// clock. None when the message names no time.
+pub fn limit_reset(text: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    use chrono::{Local, NaiveTime, TimeZone};
+    let low = text.to_lowercase();
+    let at = low.find("resets ")? + 7;
+    let rest = &low[at..];
+    let tok: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':').collect();
+    let (num, pm) = if let Some(n) = tok.strip_suffix("pm") {
+        (n, true)
+    } else {
+        (tok.strip_suffix("am")?, false)
+    };
+    let (h, m) = match num.split_once(':') {
+        Some((h, m)) => (h.parse::<u32>().ok()?, m.parse::<u32>().ok()?),
+        None => (num.parse::<u32>().ok()?, 0),
+    };
+    if !(1..=12).contains(&h) || m > 59 {
+        return None;
+    }
+    let h24 = (h % 12) + if pm { 12 } else { 0 };
+    let now = Local::now();
+    let t = NaiveTime::from_hms_opt(h24, m, 0)?;
+    let mut day = now.date_naive();
+    if now.time() >= t {
+        day = day.succ_opt()?;
+    }
+    let local = Local.from_local_datetime(&day.and_time(t)).earliest()?;
+    Some(local.with_timezone(&chrono::Utc))
 }
 
 /// Best-effort Windows toast so you know what happened without opening anything.
@@ -736,4 +773,20 @@ pub fn save_claude_token(ctx: &Ctx, token: &str) -> Result<()> {
 pub fn clear_claude_token(ctx: &Ctx) -> Result<()> {
     let _ = std::fs::remove_file(claude_token_file(ctx));
     Ok(())
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::limit_reset;
+
+    #[test]
+    fn reads_the_reset_time() {
+        let now = chrono::Utc::now();
+        for msg in ["You've hit your session limit · resets 5:40pm (Asia/Riyadh)", "limit reached, resets 4am"] {
+            let t = limit_reset(msg).expect(msg);
+            assert!(t > now && t <= now + chrono::Duration::hours(24), "{msg}: {t}");
+        }
+        assert!(limit_reset("Claude usage limit reached").is_none());
+        assert!(limit_reset("resets 13:00pm").is_none());
+    }
 }
