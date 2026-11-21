@@ -1,7 +1,8 @@
 import { AlertTriangle, Coffee, Crown, Gamepad2, Loader2, Pause, Play, Send, Settings2, Users } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Agent, ChatMsg, Team as TeamT, call, useApi } from '../lib/api'
-import { Badge, Button, Card, PageHeader, Progress, Skeleton, cx } from '../components/ui'
+import { BuildProgress } from '../components/BuildProgress'
+import { Badge, Button, Card, PageHeader, Skeleton, cx } from '../components/ui'
 import { AgentAvatar, stateLabel } from '../components/Team'
 import { go } from '../App'
 
@@ -156,11 +157,15 @@ function Building({ t }: { t: TeamT }) {
             <Badge tone="sky">{g.genre || 'New game'}</Badge>
             <Badge>{g.size}</Badge>
           </div>
-          <div className="mt-1 text-[12.5px] leading-relaxed text-ink-2">{g.pitch}</div>
+          <div className="mt-1 line-clamp-3 text-[12.5px] leading-relaxed text-ink-2" title={g.pitch}>{g.pitch}</div>
         </div>
       </div>
       <div className="mt-4">
-        <Progress value={g.progress} label={g.stage_text} />
+        <BuildProgress
+          progress={g.progress}
+          label={g.stage_text}
+          eta={g.eta}
+        />
       </div>
       {g.doing.length > 0 && (
         <div className="mt-4 space-y-1.5">

@@ -112,6 +112,9 @@ export type Home = {
   next: { uid: number; title: string; rank: number; reason: string }[]
 }
 /** A game the AI team made (filled in by the building milestones). */
+/** Rough time left for a game (minutes of work, plus any Claude usage break). */
+export type Eta = { minutes: number; break_minutes: number; tasks_left: number; finish_at: string; paused?: string | null } | null
+
 export type MyGame = {
   id: string
   title: string
@@ -123,6 +126,7 @@ export type MyGame = {
   stage_text: string
   thumb?: string | null
   updated?: string
+  eta?: Eta
 }
 
 export type Entry = { at: string; by: string; text: string; why?: string }
@@ -149,6 +153,7 @@ export type Team = {
     total: number
     doing: TeamTask[]
     activity: Entry[]
+    eta?: Eta
   } | null
   ready: number
   games_to_build: number

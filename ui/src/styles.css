@@ -102,6 +102,12 @@ body {
 .indeterminate {
   animation: indeterminate 1.3s ease-in-out infinite;
 }
+/* a soft light sweeping across a progress bar while work is happening */
+.shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.22) 50%, transparent 100%);
+  width: 40%;
+  animation: indeterminate 2.4s ease-in-out infinite;
+}
 
 /* ---------- note reader (markdown) ---------- */
 .prose-rox {

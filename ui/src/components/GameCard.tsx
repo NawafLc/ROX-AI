@@ -1,7 +1,8 @@
 import { Gamepad2, MessageSquare, Play, Send, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { MyGame, call } from '../lib/api'
-import { Badge, Button, Progress, cx } from './ui'
+import { BuildProgress } from './BuildProgress'
+import { Badge, Button, cx } from './ui'
 
 const STAGE: Record<MyGame['stage'], { label: string; tone: 'neutral' | 'brand' | 'sky' | 'amber' | 'rose' }> = {
   idea: { label: 'Designing', tone: 'neutral' },
@@ -40,7 +41,7 @@ export function GameCard({ g, onChange }: { g: MyGame; onChange?: () => void }) 
         {(g.summary || g.pitch) && <div className="mt-2 line-clamp-3 text-[12.5px] leading-relaxed text-ink-2">{done ? g.summary || g.pitch : g.pitch}</div>}
         {!done ? (
           <div className="mt-3">
-            <Progress value={g.progress} label={g.stage_text} />
+            <BuildProgress size="sm" progress={g.progress} label={g.stage_text} eta={g.eta} />
           </div>
         ) : (
           <div className={cx('mt-3 flex gap-2')}>

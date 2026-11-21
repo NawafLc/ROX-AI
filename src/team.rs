@@ -760,7 +760,14 @@ pub fn studio_summary(ctx: &Ctx) -> String {
     }
     for (_, s) in games.iter().take(6) {
         let (d, t) = s.progress();
-        out.push_str(&format!("- {} [{}] {} · {d}/{t} tasks done\n", s.game.title, s.game.slug, s.game.status));
+        out.push_str(&format!("- {} [{}] {} · {d}/{t} tasks done", s.game.title, s.game.slug, s.game.status));
+        if let Some((work, pause, left)) = estimate(ctx, s) {
+            out.push_str(&format!(" · about {} of work left ({left} steps)", human_minutes(work)));
+            if pause > 0.0 {
+                out.push_str(&format!(" + a {} Claude break", human_minutes(pause)));
+            }
+        }
+        out.push('\n');
     }
     let st = &ctx.settings;
     out.push_str(&format!(
@@ -833,13 +840,84 @@ pub fn stage_of(s: &Studio) -> (&'static str, String, f64) {
     }
 }
 
+/// Rough time left for a game, from how long this team's finished tasks really took (breaks excluded).
+/// Returns (minutes of work left, minutes of Claude break left, tasks left).
+pub fn estimate(ctx: &Ctx, s: &Studio) -> Option<(f64, f64, usize)> {
+    if matches!(s.game.status.as_str(), "ready" | "published" | "failed") || s.tasks.is_empty() {
+        return None;
+    }
+    // pair each task's last start ("T6 · …") with its finish ("T6 done…") in the activity log
+    let mut started: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>> = Default::default();
+    let mut took: Vec<f64> = vec![];
+    for e in &s.activity {
+        let Some(at) = crate::util::parse_dt(&e.at) else { continue };
+        let Some((id, rest)) = e.text.split_once(' ') else { continue };
+        if !id.starts_with('T') || !id[1..].chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        if rest.starts_with("· ") {
+            started.insert(id.to_string(), at);
+        } else if rest.starts_with("done") {
+            if let Some(t0) = started.remove(id) {
+                let m = (at - t0).num_seconds() as f64 / 60.0;
+                if (0.5..=180.0).contains(&m) {
+                    took.push(m);
+                }
+            }
+        }
+    }
+    let per_task = if took.is_empty() { 15.0 } else { took.iter().sum::<f64>() / took.len() as f64 };
+    let open = s.tasks.iter().filter(|t| t.status == "todo" || t.status == "doing").count();
+    // phases still to come: QA + code review, the Lead's final review, the test on Roblox's servers
+    let has = |k: &str| s.tasks.iter().any(|t| t.kind == k);
+    let later = if !has("qa") { 3 } else if !has("final") { 1 } else { 0 };
+    let left = open + later;
+    let lanes = if ctx.settings.team_parallel { ctx.settings.team_max_parallel.max(1) as f64 } else { 1.0 };
+    // fix rounds and retries add roughly a fifth on top
+    let work = (left as f64 * per_task * 1.2 / lanes.min(left.max(1) as f64)).max(if left > 0 { per_task } else { 5.0 });
+    let pause = paused_until(ctx)
+        .and_then(|u| crate::util::parse_dt(&u))
+        .map(|u| ((u - chrono::Utc::now()).num_seconds().max(0) as f64) / 60.0)
+        .unwrap_or(0.0);
+    Some((work.round(), pause.round(), left))
+}
+
+pub fn human_minutes(m: f64) -> String {
+    let m = m.max(1.0).round() as i64;
+    match m {
+        0..=59 => format!("{m} min"),
+        _ if m % 60 < 8 || m >= 600 => format!("{} h", (m as f64 / 60.0).round()),
+        _ => format!("{} h {} min", m / 60, (m % 60) / 5 * 5),
+    }
+}
+
+pub fn eta_json(ctx: &Ctx, s: &Studio) -> Value {
+    match estimate(ctx, s) {
+        Some((work, pause, left)) => {
+            let at = chrono::Utc::now() + chrono::Duration::minutes((work + pause) as i64);
+            {
+            let paused = if !ctx.settings.team_enabled {
+                Some("the team is paused")
+            } else if crate::autopilot::blocked(ctx).is_some() {
+                Some("waiting for you to sign in to Claude")
+            } else {
+                None
+            };
+            json!({"minutes": work, "break_minutes": pause, "tasks_left": left, "finish_at": at.to_rfc3339(), "paused": paused})
+        }
+        }
+        None => Value::Null,
+    }
+}
+
 pub fn my_games_json(ctx: &Ctx) -> Value {
     json!(all_games(ctx)
         .iter()
         .map(|(_, s)| {
             let (stage, text, p) = stage_of(s);
             json!({"id": s.game.slug, "title": s.game.title, "genre": s.game.genre, "stage": stage, "stage_text": text,
-                "progress": (p * 100.0).round(), "updated": s.game.updated, "pitch": s.game.pitch, "summary": s.game.status_note})
+                "progress": (p * 100.0).round(), "updated": s.game.updated, "pitch": s.game.pitch, "summary": s.game.status_note,
+                "eta": eta_json(ctx, s)})
         })
         .collect::<Vec<_>>())
 }
@@ -852,7 +930,7 @@ pub fn game_json(ctx: &Ctx, slug: &str) -> Result<Value> {
     let last: Value = std::fs::read_to_string(dir.join(".roxai").join("last_build.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     Ok(json!({"game": s.game, "stage": stage, "stage_text": text, "progress": (p * 100.0).round(), "tasks": s.tasks,
         "decisions": s.decisions.iter().rev().take(30).collect::<Vec<_>>(), "activity": s.activity.iter().rev().take(40).collect::<Vec<_>>(),
-        "feedback": s.feedback, "design": design, "last_build": last, "agent_runs": s.agent_runs}))
+        "feedback": s.feedback, "design": design, "last_build": last, "agent_runs": s.agent_runs, "eta": eta_json(ctx, &s)}))
 }
 
 /// The whole team for the Team and Home pages.

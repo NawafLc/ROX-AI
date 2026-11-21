@@ -337,7 +337,7 @@ fn team_json(c: &Ctx) -> Value {
         let (d, t) = s.progress();
         json!({"slug": s.game.slug, "title": s.game.title, "pitch": s.game.pitch, "genre": s.game.genre, "art_style": s.game.art_style, "size": s.game.size,
             "stage": stage, "stage_text": text, "progress": (p * 100.0).round(), "done": d, "total": t, "doing": doing,
-            "activity": s.activity.iter().rev().take(12).collect::<Vec<_>>()})
+            "activity": s.activity.iter().rev().take(12).collect::<Vec<_>>(), "eta": crate::team::eta_json(c, &s)})
     });
     let ready = crate::team::all_games(c).iter().filter(|(_, s)| s.game.status == "ready").count();
     json!({
