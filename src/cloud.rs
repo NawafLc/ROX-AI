@@ -169,6 +169,16 @@ fn root_place(universe_id: u64) -> Result<u64> {
 
 /// Upload a place file (.rbxl) as a new version of the test place. Returns the version number.
 pub fn upload_place(ctx: &Ctx, rbxl: &[u8]) -> Result<u64> {
+    upload_place_as(ctx, rbxl, "Saved")
+}
+
+/// The owner pressed Play: make this the version the private test place runs, so the owner can join it.
+/// The experience stays private (only its owner can play); nothing goes public.
+pub fn upload_playable(ctx: &Ctx, rbxl: &[u8]) -> Result<u64> {
+    upload_place_as(ctx, rbxl, "Published")
+}
+
+fn upload_place_as(ctx: &Ctx, rbxl: &[u8], version_type: &str) -> Result<u64> {
     let c = connection(ctx).ok_or_else(|| anyhow!("Roblox isn't connected yet"))?;
     let key = api_key(ctx)?;
     let a = agent()?;
@@ -177,9 +187,9 @@ pub fn upload_place(ctx: &Ctx, rbxl: &[u8]) -> Result<u64> {
     let waits = [0u64, 15, 30, 60, 90];
     for (i, wait) in waits.iter().enumerate() {
         std::thread::sleep(Duration::from_secs(*wait));
-        // "Saved" keeps it a draft version: nothing changes for players, the test place stays private.
+        // "Saved" = a draft version (tests); "Published" = what the private test place runs when its owner joins.
         let r = a
-            .post(&format!("{API}/universes/v1/{}/places/{}/versions?versionType=Saved", c.universe_id, c.place_id))
+            .post(&format!("{API}/universes/v1/{}/places/{}/versions?versionType={version_type}", c.universe_id, c.place_id))
             .set("x-api-key", &key)
             .set("Content-Type", "application/octet-stream")
             .send_bytes(rbxl);

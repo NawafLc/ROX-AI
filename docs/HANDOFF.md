@@ -89,6 +89,10 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   427 Roblox-server tests green; Lead verdict "ready"). The owner tests it before the team starts another game
   (team switched off). Still owner-side: create the 9 passes / 30 products on the published place and paste
   the ids (`monetization-ids.md` in the game folder; ids stay 0 until then, which sells nothing).
+- **Play button (start of M5):** My Games → Play builds the game and uploads it as the *Published* version of the
+  owner's private test place (`cloud::upload_playable`, `pipeline::play_upload`, UI command `game_play`), then opens
+  `roblox://experiences/start?placeId=…`. The experience stays private, so only its owner account can join. Tests
+  keep using *Saved* versions. Publish (a real public experience) is still to do.
   - `team.rs`: roster of 15 (9 active: lead, designer, economy, systems, gameplay, ui, world, qa, reviewer; the rest
     "join later"), default model aliases per agent (`opus`/`sonnet`/`haiku`, setting `agent_models` overrides).
     Board per game in `<game>\.roxai\studio.json` (locked store): game info, tasks (kind design/plan/work/fix/qa/

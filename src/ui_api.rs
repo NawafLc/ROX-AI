@@ -135,6 +135,13 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
             bg(&["team", "chat"]);
             json!({"ok": true})
         }
+        "game_play" => {
+            let dir = crate::team::game_dir(&c, &s(&a, "id"))?;
+            let place = crate::pipeline::play_upload(&c, &dir)?;
+            // straight into the Roblox app (the test place is private: sign in to Roblox with the account that owns it)
+            crate::util::open_path(&format!("roblox://experiences/start?placeId={place}"));
+            json!({"ok": true, "place": place, "url": format!("https://www.roblox.com/games/{place}")})
+        }
         "game_feedback" => {
             crate::team::add_feedback(&c, &s(&a, "id"), &s(&a, "text"))?;
             if c.settings.team_enabled && !crate::util::is_locked(&c.state_dir(), "studio") {

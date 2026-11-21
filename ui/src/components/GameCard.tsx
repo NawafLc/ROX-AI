@@ -20,6 +20,16 @@ export function GameCard({ g, onChange }: { g: MyGame; onChange?: () => void }) 
   const [fb, setFb] = useState(false)
   const [text, setText] = useState('')
   const [sent, setSent] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const [playMsg, setPlayMsg] = useState<{ ok: boolean; text: string; url?: string } | null>(null)
+  const play = () => {
+    setPlaying(true)
+    setPlayMsg(null)
+    call<{ url: string }>('game_play', { id: g.id })
+      .then((r) => setPlayMsg({ ok: true, text: 'Opening Roblox. Sign in with the account that owns your test place.', url: r.url }))
+      .catch((e) => setPlayMsg({ ok: false, text: String(e?.message ?? e) }))
+      .finally(() => setPlaying(false))
+  }
   const send = () =>
     call('game_feedback', { id: g.id, text }).then(() => {
       setSent(true)
@@ -46,17 +56,27 @@ export function GameCard({ g, onChange }: { g: MyGame; onChange?: () => void }) 
         ) : (
           <div className={cx('mt-3 flex gap-2')}>
             {g.stage !== 'failed' && (
-              <Button size="sm" kind="primary" disabled title="Playing your private test version arrives in the next update" icon={<Play className="size-3.5" />}>
-                Play
+              <Button size="sm" kind="primary" loading={playing} onClick={play} title="Puts this game on your private test place and opens it in Roblox" icon={<Play className="size-3.5" />}>
+                {playing ? 'Uploading…' : 'Play'}
               </Button>
             )}
             <Button size="sm" icon={<MessageSquare className="size-3.5" />} onClick={() => setFb(!fb)}>
               Feedback
             </Button>
             {g.stage === 'ready' && (
-              <Button size="sm" disabled title="Publishing arrives in the next update" icon={<Upload className="size-3.5" />}>
+              <Button size="sm" disabled title="Publishing to a public game is coming soon. Play it on your private test place first." icon={<Upload className="size-3.5" />}>
                 Publish
               </Button>
+            )}
+          </div>
+        )}
+        {playMsg && (
+          <div className={cx('fade-in mt-2 text-[12px]', playMsg.ok ? 'text-brand' : 'text-rose')}>
+            {playMsg.text}{' '}
+            {playMsg.url && (
+              <button className="underline underline-offset-2" onClick={() => call('open', { what: 'url', url: playMsg.url })}>
+                Open in browser instead
+              </button>
             )}
           </div>
         )}

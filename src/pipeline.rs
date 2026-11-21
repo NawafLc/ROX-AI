@@ -343,6 +343,25 @@ fn finish(ctx: &Ctx, dir: &Path, mut rep: Report) -> Result<Report> {
 
 /// Builds and tests the starter project end to end: proves the whole pipeline works on this PC.
 /// Build the place and run one Luau snippet against it on this PC; returns what it printed.
+/// Owner's Play button: build the game and make it the version the private test place runs. Returns the place id.
+pub fn play_upload(ctx: &Ctx, dir: &Path) -> Result<u64> {
+    let c = crate::cloud::connection(ctx).ok_or_else(|| anyhow!("Connect your Roblox test place first (Settings → Game building)"))?;
+    let _lock = crate::util::single_instance(&ctx.state_dir(), "pipeline")
+        .map_err(|_| anyhow!("ROX-AI is building or testing a game right now. Try again in a minute."))?;
+    let dir = PathBuf::from(dir.canonicalize()?.to_string_lossy().trim_start_matches(r"\\?\").to_string());
+    let rojo = tool_path(ctx, "rojo").ok_or_else(|| anyhow!("The build tools aren't installed yet"))?;
+    let out = dir.join("build").join("play.rbxl");
+    std::fs::create_dir_all(out.parent().unwrap())?;
+    let _ = std::fs::remove_file(&out);
+    let (code, text) = crate::util::run_capture(&rojo.to_string_lossy(), &["build", &dir.to_string_lossy(), "--output", &out.to_string_lossy()], Duration::from_secs(300))?;
+    if code != 0 || !out.is_file() {
+        bail!("Rojo couldn't build the place:\n{}", tail(&text, 12));
+    }
+    let v = crate::cloud::upload_playable(ctx, &std::fs::read(&out)?)?;
+    crate::info!("play: {} is version {v} of the test place {}", dir.display(), c.place_id);
+    Ok(c.place_id)
+}
+
 pub fn run_snippet(ctx: &Ctx, dir: &Path, code: &str) -> Result<String> {
     let _lock = crate::util::single_instance(&ctx.state_dir(), "pipeline")?;
     let dir = PathBuf::from(dir.canonicalize()?.to_string_lossy().trim_start_matches(r"\\?\").to_string());
