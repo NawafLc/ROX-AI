@@ -192,6 +192,25 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
             }
             json!({"ok": true})
         }
+        "claude_token_save" => {
+            let t = a.get("token").and_then(|v| v.as_str()).unwrap_or("");
+            crate::autopilot::save_claude_token(&c, t)?;
+            json!({"ok": true})
+        }
+        "claude_token_window" => {
+            // a visible console where the owner signs in once and copies the long-lived token
+            let Some(claude) = crate::autopilot::find_claude(&c) else { bail!("Install Claude Code first (Settings → Run setup)") };
+            std::process::Command::new("cmd")
+                .args(["/c", "start", "Claude sign-in for ROX-AI", "cmd", "/k"])
+                .arg(&claude)
+                .arg("setup-token")
+                .spawn()?;
+            json!({"ok": true})
+        }
+        "claude_token_clear" => {
+            crate::autopilot::clear_claude_token(&c)?;
+            json!({"ok": true})
+        }
         "unblock" => {
             c.store.set("blocked_reason", Value::Null)?;
             json!({"ok": true})
@@ -347,6 +366,7 @@ fn team_json(c: &Ctx) -> Value {
         "claude_ready": crate::autopilot::find_claude(c).is_some(),
         "blocked": crate::autopilot::blocked(c),
         "roblox_connected": crate::cloud::connection(c).is_some(),
+        "claude_token": crate::autopilot::has_claude_token(c),
         "agents": crate::team::agents_json(c),
         "current": cur,
         "ready": ready,

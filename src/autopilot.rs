@@ -122,6 +122,9 @@ pub struct ClaudeOpts {
     /// "" = the account default; otherwise an alias ("opus", "sonnet", "haiku") or a full model id
     pub model: String,
     pub tools: String,
+    /// Claude Code's own built-in tools the session gets at all ("" = none). Fewer tools = a smaller prompt every
+    /// turn, and the session can't touch files or run commands outside ROX-AI's tools.
+    pub builtin: String,
     /// extra environment for ROX-AI's MCP server (e.g. which game an agent works on)
     pub mcp_env: Vec<(String, String)>,
     pub timeout: Duration,
@@ -136,6 +139,7 @@ impl ClaudeOpts {
         ClaudeOpts {
             model: String::new(),
             tools: "mcp__roxai,WebSearch,WebFetch".into(),
+            builtin: "WebSearch,WebFetch".into(),
             mcp_env: vec![],
             timeout: Duration::from_secs(30 * 60),
             tag: "run".into(),
@@ -181,6 +185,8 @@ pub fn run_claude_opts(ctx: &Ctx, prompt: &str, o: &ClaudeOpts) -> Result<Claude
         "json",
         "--max-turns",
         &o.max_turns.to_string(),
+        "--tools",
+        &o.builtin,
     ]);
     if !o.model.is_empty() {
         cmd.args(["--model", &o.model]);
@@ -192,9 +198,15 @@ pub fn run_claude_opts(ctx: &Ctx, prompt: &str, o: &ClaudeOpts) -> Result<Claude
     };
     cmd.current_dir(wd)
         .env("ROXAI_HOME", &ctx.home)
+        // ROX-AI's tools are few: load them up front instead of spending turns searching for them
+        .env("ENABLE_TOOL_SEARCH", "false")
         .stdin(std::process::Stdio::piped())
         .stdout(f.try_clone()?)
         .stderr(f);
+    // a long-lived sign-in made for ROX-AI (claude setup-token) doesn't expire when other Claude apps refresh theirs
+    if let Some(t) = claude_token(ctx) {
+        cmd.env("CLAUDE_CODE_OAUTH_TOKEN", t);
+    }
     crate::info!("starting claude for {tag} (timeout {}s)", timeout.as_secs());
     let mut child = cmd.spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
@@ -682,4 +694,40 @@ fn inner(
         .into(),
         json!({"games": results, "queue": queue.len(), "completed": done}),
     ))
+}
+
+// ------------------------------------------------------------------ long-lived Claude sign-in
+
+fn claude_token_file(ctx: &Ctx) -> PathBuf {
+    ctx.home.join("secrets").join("claude.token")
+}
+
+/// The long-lived sign-in token from `claude setup-token`, if the owner saved one (encrypted on this PC).
+pub fn claude_token(ctx: &Ctx) -> Option<String> {
+    let raw = std::fs::read(claude_token_file(ctx)).ok()?;
+    let t = String::from_utf8(crate::cloud::unprotect(&raw).ok()?).ok()?;
+    let t = t.trim().to_string();
+    (!t.is_empty()).then_some(t)
+}
+
+pub fn has_claude_token(ctx: &Ctx) -> bool {
+    claude_token_file(ctx).is_file()
+}
+
+/// Save the token (never logged or shown again) and clear the "sign in" blocker.
+pub fn save_claude_token(ctx: &Ctx, token: &str) -> Result<()> {
+    let t = token.trim().trim_matches('"');
+    if !t.starts_with("sk-ant-") || t.len() < 40 || t.contains(char::is_whitespace) {
+        bail!("That doesn't look like a Claude sign-in token. Copy the whole line that starts with sk-ant- from `claude setup-token`.");
+    }
+    let p = claude_token_file(ctx);
+    std::fs::create_dir_all(p.parent().unwrap())?;
+    crate::util::atomic_write(&p, &crate::cloud::protect(t.as_bytes())?)?;
+    ctx.store.set("blocked_reason", serde_json::Value::Null)?;
+    Ok(())
+}
+
+pub fn clear_claude_token(ctx: &Ctx) -> Result<()> {
+    let _ = std::fs::remove_file(claude_token_file(ctx));
+    Ok(())
 }

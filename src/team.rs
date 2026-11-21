@@ -357,7 +357,9 @@ pub fn run_agent(ctx: &Ctx, dir: Option<&Path>, agent_id: &str, mission: &str, s
         tag: tag.clone(),
         max_turns: 150,
         workdir: Some(team_workdir(ctx)?),
-        ..ClaudeOpts::new(ctx)
+        // only the Lead researches the market on the web; builders work purely through the project tools
+        tools: if agent_id == "lead" { "mcp__roxai,WebSearch,WebFetch".into() } else { "mcp__roxai".into() },
+        builtin: if agent_id == "lead" { "WebSearch,WebFetch".into() } else { String::new() },
     };
     set_now(ctx, agent_id, Some((&slug, status_text)));
     if let Some(d) = dir {
@@ -397,11 +399,11 @@ fn mission(t: &Task, s: &Studio) -> String {
         "design" => "Start with `board` and the Playbook chapters for your job, then write design.md with `project_write`. Make it specific enough that scripters can build it without asking anything: exact items, numbers, timers, screens, areas, and the first-5-minutes flow step by step. Keep it buildable at the agreed size. Then `task_update` done.",
         "plan" => "Read design.md, then split ALL of it into tasks with `task_add` (owner, a precise 'done when', and deps where order matters: shared config/data first, then systems, then gameplay/UI/world). Usually 8-20 tasks for a small game. Include an economy task for the numbers. Do not create QA, review or final tasks: the studio adds those. Log the key decisions, then `task_update` done.",
         "qa" => "Test the whole game against design.md: add unit tests for every piece of shared logic, add `remoteOnly` specs that check the server starts cleanly (no errors in output), remotes and data defaults exist. Run `project_build` and `project_test`. File a precise bug task (`task_add`, owner = whoever owns that area) for each problem. Then `task_update` done with a summary.",
-        "review" => "Review every script (`project_files`, `project_read`). Fix small issues yourself with `project_edit` and keep `project_build` green. File tasks for bigger problems. Then `task_update` done with what you found.",
+        "review" => "Review every script (`project_files`, `project_outline`, then `project_read` the parts that matter: server code, remotes and data first). Fix small issues yourself with `project_edit` and keep `project_build` green. File tasks for bigger problems. Then `task_update` done with what you found.",
         "final" => "Decide if the game is ready for the owner. Check design.md against what was built (`project_files`, `project_read`), the last build/test results (`project_test` once), QA and review notes. If it meets the quality bar, call `game_verdict(\"ready\", summary)` where the summary is 2-4 sentences for the owner (what the game is, how to play). Otherwise add precise tasks for what's missing and call `game_verdict(\"more_work\", why)`. Be demanding but finish: this is round {round} of reviews; after round 3 accept the game unless something is broken.",
         "feedback" => "The owner gave feedback (see 'Owner feedback' above). Turn every point into precise tasks with `task_add` (right owner, clear 'done when'), update design.md if the design changes, log a `decision` for anything you choose not to do and why, then `task_update` done.",
         "fix" => "The build is failing. Run `project_build`, read the errors, fix the cause (not the test), and repeat until it passes. Then `task_update` done.",
-        _ => "Read `board` and design.md, do the work with the project tools, run `project_build` until it passes, then `task_update` done with what you built.",
+        _ => "Read `board`, then only the parts of design.md your task needs (`project_outline design.md` gives the section line numbers; `project_read` with offset/limit). Do the work with the project tools, run `project_build` until it passes, then `task_update` done with what you built.",
     };
     format!("{base}\n{}", how.replace("{round}", &(s.review_rounds + 1).to_string()))
 }

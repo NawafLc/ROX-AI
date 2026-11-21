@@ -22,15 +22,16 @@ pub fn defs() -> Vec<Value> {
     let t = |name: &str, desc: &str, schema: Value| json!({"name": name, "description": desc, "inputSchema": schema});
     let s = json!({"type": "string"});
     let mut v = vec![
-        t("board", "The game you're building: info, the whole task board, recent decisions and activity. Read it first.", obj(json!({}), &[])),
+        t("board", "The game you're building: info, open tasks in full, finished tasks in one line each, recent decisions and activity. Read it once at the start. full=true also shows finished tasks' notes.", obj(json!({"full": {"type": "boolean"}}), &[])),
         t("project_files", "List every file in the game project (path, lines).", obj(json!({}), &[])),
-        t("project_read", "Read a project file (path relative to the game folder, e.g. src/shared/Config.luau). Use offset/limit (lines) for long files.",
+        t("project_outline", "A file's structure with line numbers (functions, types, tables, sections) without the code. Use it before reading a long file, then read only the lines you need.", obj(json!({"path": s}), &["path"])),
+        t("project_read", "Read a project file (path relative to the game folder, e.g. src/shared/Config.luau). At most 400 lines per call: use offset/limit (lines) and project_outline for long files.",
           obj(json!({"path": s, "offset": {"type": "integer"}, "limit": {"type": "integer"}}), &["path"])),
         t("project_write", "Create or replace a whole project file.", obj(json!({"path": s, "content": s}), &["path", "content"])),
         t("project_edit", "Replace an exact piece of text in a project file (old must match exactly once unless replace_all).",
           obj(json!({"path": s, "old": s, "new": s, "replace_all": {"type": "boolean"}}), &["path", "old", "new"])),
         t("project_delete", "Delete a project file.", obj(json!({"path": s}), &["path"])),
-        t("project_search", "Search all project files for text (case-insensitive). Returns path:line: text.", obj(json!({"query": s}), &["query"])),
+        t("project_search", "Search project files for text (case-insensitive). Returns path:line: text (up to 60 hits). path = only files whose path contains this text.", obj(json!({"query": s, "path": s}), &["query"])),
         t("project_build", "Build the place with Rojo, compile every script and run the unit tests (this PC). Run it after every change.", obj(json!({}), &[])),
         t("project_test", "Build, upload to the private test place and run all tests (including remoteOnly specs) on Roblox's servers, with the server output. Slower and rate limited: use it for real checks.", obj(json!({}), &[])),
         t("task_add", "Add a task to the board. owner: lead, designer, economy, systems, gameplay, ui, world, qa, reviewer.",
@@ -120,8 +121,9 @@ fn build_text(rep: &crate::pipeline::Report) -> String {
     out
 }
 
-fn board_text(dir: &Path) -> String {
+fn board_text(dir: &Path, full: bool) -> String {
     let s = team::load(dir);
+    let me = agent_id().unwrap_or_default();
     let g = &s.game;
     let (d, t) = s.progress();
     let mut out = format!(
@@ -129,15 +131,21 @@ fn board_text(dir: &Path) -> String {
         g.title, g.slug, g.status, g.size, g.art_style, g.pitch, g.genre, g.inspired_by, g.twist
     );
     for x in &s.tasks {
+        if x.status == "done" && !full {
+            // finished work in one line: the details live in the code and the decisions
+            out.push_str(&format!("- {} [done] {} → {}\n", x.id, x.title, x.owner));
+            continue;
+        }
+        let note_len = if full || x.owner == me { 600 } else { 240 };
         out.push_str(&format!(
             "- {} [{}] {} → {} · done when: {}{}{}\n",
             x.id,
             x.status,
             x.title,
             x.owner,
-            x.done_when,
+            if full || x.owner == me { x.done_when.clone() } else { cut(&x.done_when, 160) },
             if x.deps.is_empty() { String::new() } else { format!(" · after {}", x.deps.join(", ")) },
-            x.notes.last().map(|n| format!("\n    last note: {}", n.chars().take(400).collect::<String>())).unwrap_or_default()
+            x.notes.last().map(|n| format!("\n    last note: {}", cut(n, note_len))).unwrap_or_default()
         ));
     }
     if !s.feedback.is_empty() {
@@ -147,12 +155,12 @@ fn board_text(dir: &Path) -> String {
         }
     }
     out.push_str("\n## Recent decisions\n");
-    for x in s.decisions.iter().rev().take(12) {
-        out.push_str(&format!("- [{}] {} — {}\n", x.by, x.text, x.why));
+    for x in s.decisions.iter().rev().take(if full { 30 } else { 8 }) {
+        out.push_str(&format!("- [{}] {} — {}\n", x.by, cut(&x.text, 300), cut(&x.why, 200)));
     }
     out.push_str("\n## Recent activity\n");
-    for x in s.activity.iter().rev().take(10) {
-        out.push_str(&format!("- [{}] {}\n", x.by, x.text));
+    for x in s.activity.iter().rev().filter(|x| !x.text.starts_with("files:")).take(8) {
+        out.push_str(&format!("- [{}] {}\n", x.by, cut(&x.text, 160)));
     }
     if !dir.join("design.md").is_file() {
         out.push_str("\n(design.md doesn't exist yet)\n");
@@ -187,7 +195,7 @@ fn call_inner(ctx: &Ctx, me: &str, name: &str, a: &Value) -> Result<String> {
                 bail!("title is required");
             }
             let dir = team::create_game(ctx, info)?;
-            format!("Created. The Game Designer writes design.md next, then you plan the build.\n\n{}", board_text(&dir))
+            format!("Created. The Game Designer writes design.md next, then you plan the build.\n\n{}", board_text(&dir, false))
         }
         "team_settings" => {
             let mut st = crate::config::Settings::load(&ctx.home);
@@ -228,7 +236,12 @@ fn call_inner(ctx: &Ctx, me: &str, name: &str, a: &Value) -> Result<String> {
 
 fn game_tool(ctx: &Ctx, me: &str, dir: &Path, name: &str, a: &Value) -> Result<String> {
     Ok(match name {
-        "board" => board_text(dir),
+        "board" => board_text(dir, a.get("full").and_then(|v| v.as_bool()).unwrap_or(false)),
+        "project_outline" => {
+            let p = safe_path(dir, arg(a, "path"))?;
+            let text = std::fs::read_to_string(&p).map_err(|_| anyhow!("no file {}", arg(a, "path")))?;
+            outline(&text)
+        }
         "project_files" => {
             let mut v = vec![];
             walk(dir, dir, &mut v);
@@ -238,11 +251,13 @@ fn game_tool(ctx: &Ctx, me: &str, dir: &Path, name: &str, a: &Value) -> Result<S
             let p = safe_path(dir, arg(a, "path"))?;
             let text = std::fs::read_to_string(&p).map_err(|_| anyhow!("no file {}", arg(a, "path")))?;
             let off = a.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let lim = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+            let lim = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(400).clamp(1, 400) as usize;
             let lines: Vec<&str> = text.lines().collect();
             let end = (off + lim).min(lines.len());
             let body = lines.get(off.min(lines.len())..end).unwrap_or(&[]).join("\n");
-            if end < lines.len() || off > 0 {
+            if end < lines.len() {
+                format!("(lines {}-{} of {}; read on with offset={end}, or use project_outline)\n{body}", off + 1, end, lines.len())
+            } else if off > 0 {
                 format!("(lines {}-{} of {})\n{body}", off + 1, end, lines.len())
             } else {
                 body
@@ -290,22 +305,27 @@ fn game_tool(ctx: &Ctx, me: &str, dir: &Path, name: &str, a: &Value) -> Result<S
             if q.is_empty() {
                 bail!("query is empty");
             }
+            let only = arg(a, "path").to_lowercase().replace('\\', "/");
             let mut files = vec![];
             walk(dir, dir, &mut files);
             let mut hits = vec![];
-            'f: for (rel, _) in files {
+            let mut more = false;
+            'f: for (rel, _) in files.into_iter().filter(|(r, _)| only.is_empty() || r.to_lowercase().contains(&only)) {
                 let Ok(text) = std::fs::read_to_string(dir.join(&rel)) else { continue };
                 for (i, l) in text.lines().enumerate() {
                     if l.to_lowercase().contains(&q) {
-                        hits.push(format!("{rel}:{}: {}", i + 1, l.trim()));
-                        if hits.len() >= 200 {
+                        if hits.len() >= 60 {
+                            more = true;
                             break 'f;
                         }
+                        hits.push(format!("{rel}:{}: {}", i + 1, cut(l.trim(), 200)));
                     }
                 }
             }
             if hits.is_empty() {
                 "No matches.".into()
+            } else if more {
+                format!("{}\n(more matches: narrow the query or pass path)", hits.join("\n"))
             } else {
                 hits.join("\n")
             }
@@ -440,4 +460,41 @@ mod tests {
             assert!(safe_path(d, bad).is_err(), "{bad} should be refused");
         }
     }
+}
+
+/// Shorten text to n characters (with an ellipsis).
+fn cut(t: &str, n: usize) -> String {
+    if t.chars().count() > n {
+        format!("{}…", t.chars().take(n).collect::<String>())
+    } else {
+        t.to_string()
+    }
+}
+
+/// The skeleton of a Luau (or Markdown/JSON) file: declarations and headings with their line numbers.
+pub fn outline(text: &str) -> String {
+    let n = text.lines().count();
+    let mut out = vec![format!("({n} lines)")];
+    for (i, l) in text.lines().enumerate() {
+        let t = l.trim_start();
+        let indent = l.len() - t.len();
+        let keep = t.starts_with('#')
+            || t.starts_with("function ")
+            || t.starts_with("local function ")
+            || t.starts_with("export type ")
+            || t.starts_with("type ")
+            || (indent == 0
+                && !t.starts_with("--")
+                && !t.starts_with(['-', '*', '|', '>'])
+                && (t.starts_with("local ") || t.starts_with("return ") || t.contains(" = ")))
+            || (indent <= 4 && t.contains(" = function"));
+        if keep {
+            out.push(format!("{:>5}: {}", i + 1, cut(t.trim_end(), 140)));
+        }
+        if out.len() > 300 {
+            out.push("… (outline cut at 300 entries)".into());
+            break;
+        }
+    }
+    out.join("\n")
 }

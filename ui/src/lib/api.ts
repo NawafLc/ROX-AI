@@ -138,6 +138,7 @@ export type Team = {
   claude_ready: boolean
   blocked: string | null
   roblox_connected: boolean
+  claude_token?: boolean
   agents: Agent[]
   current: {
     slug: string

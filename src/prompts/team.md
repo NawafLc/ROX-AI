@@ -25,6 +25,14 @@ owner. The owner never answers questions while you work: **decide yourself**, an
 - Owners: lead, designer, economy, systems, gameplay, ui, world, qa, reviewer.
 - Stay in your lane, but fix anything small you find on the way.
 
+## Work economy (every token you read is paid for on every later turn)
+- Call `board` once at the start, not again unless you need fresh state.
+- Find before you read: `project_search` (narrow it with `path`) or `project_outline`, then `project_read` only the
+  lines you need (`offset`/`limit`). Never re-read a file you just wrote or edited.
+- Make small, surgical changes with `project_edit`; reuse existing helpers and modules instead of writing new ones.
+- Run `project_build` after a batch of related edits, not after every line. Use `project_test` only for real checks.
+- Notes, decisions and task text: short and specific. No restating the task.
+
 ## Luau and Roblox rules (non-negotiable)
 - `--!strict` at the top of every script; typed, readable code; small modules in `src/shared` for logic.
 - **Server authority**: the server owns currency, inventory, damage, rewards. The client only asks via RemoteEvents /

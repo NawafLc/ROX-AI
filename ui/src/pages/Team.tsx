@@ -1,4 +1,4 @@
-import { AlertTriangle, Coffee, Crown, Gamepad2, Loader2, Pause, Play, Send, Settings2, Users } from 'lucide-react'
+import { AlertTriangle, Check, Coffee, Crown, Gamepad2, KeyRound, Loader2, Pause, Play, Send, Settings2, SquareTerminal, Users } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Agent, ChatMsg, Team as TeamT, call, useApi } from '../lib/api'
 import { BuildProgress } from '../components/BuildProgress'
@@ -58,13 +58,7 @@ export default function Team() {
       {!t.claude_ready && (
         <Notice icon={<AlertTriangle className="size-4" />} text="Claude Code isn't set up yet. Open Settings → Run setup, then come back." action={['Open settings', () => go('settings')]} />
       )}
-      {t.claude_ready && t.blocked && (
-        <Notice
-          icon={<AlertTriangle className="size-4" />}
-          text={`${t.blocked}. Sign in once and the team carries on by itself.`}
-          action={['Sign in', () => call('dep_act', { id: 'claude_login', action: 'signin' }).then(() => call('unblock'))]}
-        />
-      )}
+      {t.claude_ready && t.blocked && <StaySignedIn t={t} onDone={reload} />}
       {t.claude_ready && !t.blocked && !t.roblox_connected && (
         <Notice
           icon={<AlertTriangle className="size-4" />}
@@ -105,6 +99,88 @@ export default function Team() {
         </>
       )}
     </>
+  )
+}
+
+/**
+ * Claude signed out: the fix that lasts. `claude setup-token` makes a sign-in just for ROX-AI (about a year), so the
+ * team no longer gets signed out when other Claude apps on this PC refresh theirs. The token is saved encrypted.
+ */
+function StaySignedIn({ t, onDone }: { t: TeamT; onDone: () => void }) {
+  const [token, setToken] = useState('')
+  const [opened, setOpened] = useState(false)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const save = () => {
+    setBusy(true)
+    setErr('')
+    call('claude_token_save', { token })
+      .then(() => {
+        setToken('')
+        onDone()
+      })
+      .catch((e) => setErr(String((e as Error).message ?? e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <Card className="fade-in mb-5 border-amber/30 p-5">
+      <div className="flex items-start gap-3">
+        <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-amber/12 text-amber">
+          <KeyRound className="size-4.5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[14.5px] font-semibold">Keep the team signed in to Claude</div>
+          <div className="mt-0.5 text-[12.5px] leading-relaxed text-ink-2">
+            {t.claude_token
+              ? 'The saved sign-in stopped working. Make a new one: it takes a minute.'
+              : 'The team was signed out because other Claude apps on this PC refresh the shared sign-in. Give ROX-AI its own sign-in once and it stays signed in for about a year.'}
+          </div>
+          <ol className="mt-4 space-y-3 text-[13px]">
+            <li className="flex items-center gap-3">
+              <Step n={1} done={opened} />
+              <span className="flex-1 text-ink-2">Open the sign-in window and sign in to Claude in your browser.</span>
+              <Button size="sm" icon={<SquareTerminal className="size-3.5" />} onClick={() => call('claude_token_window').then(() => setOpened(true))}>
+                Open sign-in window
+              </Button>
+            </li>
+            <li className="flex items-start gap-3">
+              <Step n={2} done={false} />
+              <div className="flex-1">
+                <div className="text-ink-2">Copy the long line it shows (it starts with sk-ant-) and paste it here.</div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="password"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && token.trim() && save()}
+                    placeholder="sk-ant-…"
+                    className="selectable h-9 min-w-0 flex-1 rounded-[10px] border border-line bg-bg px-3 text-[13px] outline-none placeholder:text-mute focus:border-brand/60"
+                  />
+                  <Button size="sm" kind="primary" loading={busy} disabled={!token.trim()} onClick={save}>
+                    Save
+                  </Button>
+                </div>
+                {err && <div className="mt-2 text-[12px] text-rose">{err}</div>}
+              </div>
+            </li>
+          </ol>
+          <div className="mt-4 flex items-center justify-between border-t border-line pt-3 text-[12px] text-mute">
+            <span>Saved encrypted on this PC only. Your AI team can never read it.</span>
+            <button className="text-ink-2 underline-offset-2 hover:underline" onClick={() => call('dep_act', { id: 'claude_login', action: 'signin' }).then(() => call('unblock')).then(onDone)}>
+              Just sign in again instead
+            </button>
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function Step({ n, done }: { n: number; done: boolean }) {
+  return (
+    <span className={cx('grid size-6 shrink-0 place-items-center rounded-full text-[11.5px] font-semibold', done ? 'bg-brand text-bg' : 'bg-card-2 text-ink-2 ring-1 ring-line')}>
+      {done ? <Check className="size-3.5" /> : n}
+    </span>
   )
 }
 

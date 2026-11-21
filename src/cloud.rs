@@ -73,21 +73,21 @@ fn dpapi(data: &[u8], encrypt: bool) -> Result<Vec<u8>> {
 }
 
 #[cfg(windows)]
-fn protect(data: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn protect(data: &[u8]) -> Result<Vec<u8>> {
     dpapi(data, true)
 }
 #[cfg(windows)]
-fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
     dpapi(data, false)
 }
 
 // Other systems (tests / CI on Linux): owner-only file.
 #[cfg(not(windows))]
-fn protect(data: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn protect(data: &[u8]) -> Result<Vec<u8>> {
     Ok(data.to_vec())
 }
 #[cfg(not(windows))]
-fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
     Ok(data.to_vec())
 }
 

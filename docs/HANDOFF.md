@@ -109,6 +109,21 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
 - Then M4 Market ideas, M5 invisible Studio + My Games Play/Feedback/Publish, M6 Create + Library, M7 Live ops,
   M8 Promo, M9 iPhone.
 
+## Running the team for real (learned on the first game)
+- Claude usage limits: agent runs that hit one pause the team (`team_paused_until`, 60 min); the `team run` process
+  waits it out itself (PC kept awake by `util::KeepAwake`) and doesn't use up task attempts. The hourly Learning
+  task repeats all day (P1D) as a backup; `setup::ensure` re-creates tasks when the `sched2` suffix changes.
+- Sign-in: the shared Claude Code login kept expiring between runs (other Claude apps refresh it). Team page →
+  "Keep the team signed in": `claude setup-token` in a console, owner pastes the token, saved DPAPI-encrypted in
+  `data\secrets\claude.token`, passed to every session as `CLAUDE_CODE_OAUTH_TOKEN`.
+- Token economy: agent sessions get no built-in tools (`--tools ""`; the Lead and learning runs keep only
+  WebSearch/WebFetch), MCP tools load up front (`ENABLE_TOOL_SEARCH=false`). `board` is compact (finished tasks one
+  line, others' text cut), `project_read` ≤ 400 lines, `project_outline` (file skeleton with line numbers),
+  `project_search` ≤ 60 hits with `path` filter. The rulebook has a "Work economy" section. On the first game the
+  board was 73k chars and file reads were 59% of all tool output; the agents' own context re-reads dominate usage.
+- Progress: `team::estimate` = average real task time (from the activity log) × open tasks + QA/review/final, shown
+  as a bar with % and "about X left · done around HH:MM" (Team page, My Games, `roxai team status`, Lead chat).
+
 ## Known notes
 - Windows title bar is custom (frameless); confirm on their screen that dragging/maximize/close and the border look right.
 - Game icons and some YouTube pages were blocked in the cloud sandbox; they should work on the PC — verify.
