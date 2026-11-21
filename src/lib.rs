@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod pipeline;
 pub mod playbook;
 pub mod relocate;
+pub mod render;
 pub mod scan;
 pub mod selftest;
 pub mod session;

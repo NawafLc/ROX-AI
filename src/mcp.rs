@@ -275,6 +275,22 @@ impl Server {
     }
 
     pub fn call(&self, name: &str, a: &Value) -> Out {
+        if name == "project_render" {
+            if let Some(r) = crate::team_tools::render_call(&self.ctx, a) {
+                return match r {
+                    Ok((text, images)) => {
+                        let mut content: Vec<Value> = vec![];
+                        for (view, jpg) in images {
+                            content.push(json!({"type": "text", "text": format!("view: {view}")}));
+                            content.push(json!({"type": "image", "data": base64::engine::general_purpose::STANDARD.encode(&jpg), "mimeType": "image/jpeg"}));
+                        }
+                        content.push(json!({"type": "text", "text": text}));
+                        Out { content, is_error: false }
+                    }
+                    Err(e) => Out::err(format!("{e:#}")),
+                };
+            }
+        }
         if let Some(r) = crate::team_tools::call(&self.ctx, name, a) {
             return match r {
                 Ok(t) => Out::text(t),

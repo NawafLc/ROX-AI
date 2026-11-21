@@ -51,7 +51,7 @@ pub const AGENTS: [AgentDef; 15] = [
     AgentDef { id: "ui", name: "UI Builder", role: "Builds menus, HUD and shops", model: "sonnet", chapters: &["ui-ux", "first-5-minutes"], active: true,
         brief: "You are the UI Builder. You build every screen in code: HUD, currency display, shop, upgrades, inventory, settings, onboarding hints. Clean modern style, big tap targets, works on phone/tablet/PC (UIScale, UIAspectRatioConstraint, safe areas), smooth tweens, consistent colors and fonts." },
     AgentDef { id: "world", name: "World Builder", role: "Builds the map and spaces", model: "sonnet", chapters: &["first-5-minutes", "core-loops"], active: true,
-        brief: "You are the World Builder. You build the map from Roblox parts and built-in materials (via default.project.json and/or a server build script that creates the world at startup): spawn, main areas, paths, landmarks, lighting and atmosphere. Readable layout, clear goals in sight, good performance (anchored parts, sensible part counts)." },
+        brief: "You are the World Builder. You build the map from Roblox parts and built-in materials (via default.project.json and/or a server build script that creates the world at startup): spawn, main areas, paths, landmarks, lighting and atmosphere. Readable layout, clear goals in sight, good performance (anchored parts, sensible part counts). Look at what you built with `project_render` (spawn, overview and your own camera views) and fix what looks wrong before you finish; pass `setup` once if a script builds the world." },
     AgentDef { id: "qa", name: "QA Tester", role: "Tests every build", model: "sonnet", chapters: &["technical", "first-5-minutes", "ui-ux"], active: true,
         brief: "You are the QA Tester. You write unit tests for the game's logic (tests/*.spec.luau) and remoteOnly specs that check the real server (scripts start without errors, remotes exist, data defaults are valid), run project_build and project_test, and file precise bug tasks (owner, steps, expected vs actual) for anything broken or missing from design.md." },
     AgentDef { id: "reviewer", name: "Code Reviewer", role: "Reviews code for bugs and exploits", model: "opus", chapters: &["technical"], active: true,
@@ -416,9 +416,9 @@ fn mission(t: &Task, s: &Studio) -> String {
     let how = match t.kind.as_str() {
         "design" => "Start with `board` and the Playbook chapters for your job, then write design.md with `project_write`. Make it specific enough that scripters can build it without asking anything: exact items, numbers, timers, screens, areas, and the first-5-minutes flow step by step. Keep it buildable at the agreed size. Then `task_update` done.",
         "plan" => "Read design.md, then split ALL of it into tasks with `task_add` (owner, a precise 'done when', and deps where order matters: shared config/data first, then systems, then gameplay/UI/world). Usually 8-20 tasks for a small game. Include an economy task for the numbers. Do not create QA, review or final tasks: the studio adds those. Log the key decisions, then `task_update` done.",
-        "qa" => "Test the whole game against design.md: add unit tests for every piece of shared logic, add `remoteOnly` specs that check the server starts cleanly (no errors in output), remotes and data defaults exist. Run `project_build` and `project_test`. File a precise bug task (`task_add`, owner = whoever owns that area) for each problem. Then `task_update` done with a summary.",
+        "qa" => "Test the whole game against design.md: add unit tests for every piece of shared logic, add `remoteOnly` specs that check the server starts cleanly (no errors in output), remotes and data defaults exist. Run `project_build` and `project_test`. Then look at the game with `project_render` (spawn, overview, and a view of each main area): a buried or floating spawn, the goal not visible from the spawn, things blocking the view, empty or unfinished areas, parts in the wrong place or clashing colours are bugs too. File a precise bug task (`task_add`, owner = whoever owns that area) for each problem. Then `task_update` done with a summary.",
         "review" => "Review every script (`project_files`, `project_outline`, then `project_read` the parts that matter: server code, remotes and data first). Fix small issues yourself with `project_edit` and keep `project_build` green. File tasks for bigger problems. Then `task_update` done with what you found.",
-        "final" => "Decide if the game is ready for the owner. Check design.md against what was built (`project_files`, `project_read`), the last build/test results (`project_test` once), QA and review notes. If it meets the quality bar, call `game_verdict(\"ready\", summary)` where the summary is 2-4 sentences for the owner (what the game is, how to play). Otherwise add precise tasks for what's missing and call `game_verdict(\"more_work\", why)`. Be demanding but finish: this is round {round} of reviews; after round 3 accept the game unless something is broken.",
+        "final" => "Decide if the game is ready for the owner. Check design.md against what was built (`project_files`, `project_read`), the last build/test results (`project_test` once), QA and review notes, and **look at the game** with `project_render` (spawn + overview at least): never call it ready without seeing it. A new player must see what to do from the spawn. If it meets the quality bar, call `game_verdict(\"ready\", summary)` where the summary is 2-4 sentences for the owner (what the game is, how to play). Otherwise add precise tasks for what's missing and call `game_verdict(\"more_work\", why)`. Be demanding but finish: this is round {round} of reviews; after round 3 accept the game unless something is broken.",
         "feedback" => "The owner gave feedback (see 'Owner feedback' above). Turn every point into precise tasks with `task_add` (right owner, clear 'done when'), update design.md if the design changes, log a `decision` for anything you choose not to do and why, then `task_update` done.",
         "fix" => "The build is failing. Run `project_build`, read the errors, fix the cause (not the test), and repeat until it passes. Then `task_update` done.",
         _ => "Read `board`, then only the parts of design.md your task needs (`project_outline design.md` gives the section line numbers; `project_read` with offset/limit). Do the work with the project tools, run `project_build` until it passes, then `task_update` done with what you built.",
@@ -727,6 +727,11 @@ pub fn finish_game(ctx: &Ctx, dir: &Path, status: &str, note: &str) -> Result<()
         s.game.title.clone()
     })?;
     if status == "ready" {
+        // a fresh card picture of the finished world (same setup the team last rendered with)
+        let setup = std::fs::read_to_string(dir.join(".roxai").join("render_setup.luau")).unwrap_or_default();
+        if let Err(e) = crate::pipeline::render_world(ctx, dir, &setup, &[]) {
+            crate::warn!("card picture for {title}: {e:#}");
+        }
         crate::autopilot::notify(ctx, "Game ready", &format!("{title} is ready to play in ROX-AI."));
     } else {
         crate::autopilot::notify(ctx, "ROX-AI team", &format!("{title}: {note}"));
@@ -930,14 +935,21 @@ pub fn eta_json(ctx: &Ctx, s: &Studio) -> Value {
     }
 }
 
+/// The game's card picture (drawn by project_render) as a data URL, if there is one.
+fn card_picture(dir: &Path) -> Option<String> {
+    use base64::Engine;
+    let jpg = std::fs::read(dir.join(".roxai").join("card.jpg")).ok()?;
+    Some(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpg)))
+}
+
 pub fn my_games_json(ctx: &Ctx) -> Value {
     json!(all_games(ctx)
         .iter()
-        .map(|(_, s)| {
+        .map(|(dir, s)| {
             let (stage, text, p) = stage_of(s);
             json!({"id": s.game.slug, "title": s.game.title, "genre": s.game.genre, "stage": stage, "stage_text": text,
                 "progress": (p * 100.0).round(), "updated": s.game.updated, "pitch": s.game.pitch, "summary": s.game.status_note,
-                "eta": eta_json(ctx, s)})
+                "eta": eta_json(ctx, s), "thumb": card_picture(dir)})
         })
         .collect::<Vec<_>>())
 }

@@ -93,6 +93,15 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   owner's private test place (`cloud::upload_playable`, `pipeline::play_upload`, UI command `game_play`), then opens
   `roblox://experiences/start?placeId=…`. The experience stays private, so only its owner account can join. Tests
   keep using *Saved* versions. Publish (a real public experience) is still to do.
+- **Visual checks (M5, without Studio or the owner's screen):** `project_render` gives agents pictures of the 3D
+  world. `luau/scene.luau` loads the built place in Lune, runs an optional `setup` snippet (the game's world builder),
+  and exports every visible part (Lune keeps `part.Position`/`Orientation` writes as plain values, so the export
+  applies them like Roblox would). `render.rs` draws them with a small software rasterizer: flat shading, sun, sky,
+  haze, 2× supersampling, camera pushed in front of obstacles like Roblox's. Views: spawn, overview, top, custom
+  `{eye, look_at}`; findings such as a buried spawn. The setup is remembered in `.roxai/render_setup.luau`; each render
+  also saves `.roxai/card.jpg`, the picture on the owner's game card (redrawn when a game finishes). World builder,
+  QA and the Lead's final review must look at renders. CLI: `roxai pipeline render <dir> --setup "<luau>"`.
+  Not covered yet: UI screens, text on signs, terrain, Roblox's real lighting.
   - `team.rs`: roster of 15 (9 active: lead, designer, economy, systems, gameplay, ui, world, qa, reviewer; the rest
     "join later"), default model aliases per agent (`opus`/`sonnet`/`haiku`, setting `agent_models` overrides).
     Board per game in `<game>\.roxai\studio.json` (locked store): game info, tasks (kind design/plan/work/fix/qa/

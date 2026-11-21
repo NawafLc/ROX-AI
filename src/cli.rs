@@ -154,6 +154,13 @@ pub enum PipelineCmd {
     },
     /// Build + test the starter project end to end (uses the test place if connected)
     Selftest,
+    /// Draw pictures of a project's world into build/views (spawn, overview, top)
+    Render {
+        dir: std::path::PathBuf,
+        /// Luau that builds the runtime world, e.g. require(game.ServerScriptService.Server.WorldBuilder).build()
+        #[arg(long, default_value = "")]
+        setup: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -338,6 +345,12 @@ fn dispatch(ctx: &mut Ctx, cmd: Cmd) -> Result<i32> {
                 PipelineCmd::Tools => {
                     crate::pipeline::install_tools(ctx, &report)?;
                     print(pretty(&crate::pipeline::tools_status(ctx)));
+                    return Ok(0);
+                }
+                PipelineCmd::Render { dir, setup } => {
+                    let views = ["spawn", "overview", "top"].map(serde_json::Value::from);
+                    let r = crate::pipeline::render_world(ctx, &dir, &setup, &views)?;
+                    print(r.text);
                     return Ok(0);
                 }
                 PipelineCmd::New { name } => {

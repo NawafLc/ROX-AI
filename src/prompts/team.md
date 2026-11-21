@@ -36,6 +36,8 @@ owner. The owner never answers questions while you work: **decide yourself**, an
 - Run `project_build` after a batch of related edits, not after every line. Use `project_test` only for real checks.
 - To see a value, check a formula or simulate the economy, use `project_run` (prints come back to you). Never add
   failing tests just to print things.
+- To see the world, use `project_render` (pictures of the 3D map: spawn view, overview, your own cameras). Anyone
+  who builds or moves things in the world checks it this way; tests can't tell you a map looks wrong.
 - Notes, decisions and task text: short and specific. No restating the task.
 
 ## Luau and Roblox rules (non-negotiable)

@@ -18,6 +18,7 @@ pub const TOOLS: [(&str, &str, &str); 2] = [("rojo", "rojo-rbx/rojo", "7.7.1"), 
 const HARNESS: &str = include_str!("luau/harness.luau");
 const CHECK: &str = include_str!("luau/check.luau");
 const RUN: &str = include_str!("luau/run.luau");
+const SCENE: &str = include_str!("luau/scene.luau");
 const REMOTE: &str = include_str!("luau/remote.luau");
 
 /// The starter project every new game begins from: (path inside the project, contents).
@@ -343,6 +344,78 @@ fn finish(ctx: &Ctx, dir: &Path, mut rep: Report) -> Result<Report> {
 
 /// Builds and tests the starter project end to end: proves the whole pipeline works on this PC.
 /// Build the place and run one Luau snippet against it on this PC; returns what it printed.
+/// Pictures of the game's world: build the place, run `setup` (Luau that builds the runtime world, e.g. the
+/// game's WorldBuilder) in Lune, export the parts and draw the views. Saves them to build/views/<name>.jpg.
+pub struct Render {
+    pub images: Vec<(String, Vec<u8>)>,
+    pub text: String,
+}
+
+pub fn render_world(ctx: &Ctx, dir: &Path, setup: &str, views: &[Value]) -> Result<Render> {
+    let _lock = crate::util::single_instance(&ctx.state_dir(), "pipeline")?;
+    let dir = PathBuf::from(dir.canonicalize()?.to_string_lossy().trim_start_matches(r"\\?\").to_string());
+    let rojo = tool_path(ctx, "rojo").ok_or_else(|| anyhow!("Rojo missing: run project_build once"))?;
+    let lune = tool_path(ctx, "lune").ok_or_else(|| anyhow!("Lune missing: run project_build once"))?;
+    let build = dir.join("build");
+    std::fs::create_dir_all(build.join("views"))?;
+    let place = build.join("render.rbxl");
+    let (code_r, text) = crate::util::run_capture(&rojo.to_string_lossy(), &["build", &dir.to_string_lossy(), "--output", &place.to_string_lossy()], Duration::from_secs(300))?;
+    if code_r != 0 || !place.is_file() {
+        bail!("Rojo couldn't build the place:
+{}", tail(&text, 12));
+    }
+    let setup_file = build.join("render_setup.luau");
+    std::fs::write(&setup_file, setup)?;
+    let out = build.join("scene.json");
+    let _ = std::fs::remove_file(&out);
+    let script = script_file(ctx, "scene.luau", SCENE)?;
+    let (_, text) = crate::util::run_capture(
+        &lune.to_string_lossy(),
+        &["run", &script.to_string_lossy(), &place.to_string_lossy(), &setup_file.to_string_lossy(), &out.to_string_lossy()],
+        Duration::from_secs(120),
+    )?;
+    if !out.is_file() {
+        bail!("couldn't read the world (endless loop in setup?):
+{}", tail(&text, 12));
+    }
+    let scene: crate::render::Scene = serde_json::from_str(&std::fs::read_to_string(&out)?)?;
+    let mut lines = vec![format!("{} visible parts ({} invisible).", scene.parts.len(), scene.invisible)];
+    if let Some(e) = &scene.setup_error {
+        lines.push(format!("setup failed, so only the parts in the place file are shown: {e}"));
+    }
+    if !scene.logs.is_empty() {
+        lines.push(format!("setup printed:
+{}", scene.logs.join("
+")));
+    }
+    for f in crate::render::findings(&scene) {
+        lines.push(format!("PROBLEM: {f}"));
+    }
+    let mut images = vec![];
+    for v in crate::render::views(&scene, views)? {
+        let (w, h) = (960, 540);
+        let rgb = crate::render::draw(&scene, v.camera, w, h);
+        let jpg = crate::render::jpeg(&rgb, w, h)?;
+        let safe: String = v.name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(40).collect();
+        let _ = std::fs::write(build.join("views").join(format!("{}.jpg", if safe.is_empty() { "view" } else { &safe })), &jpg);
+        let c = v.camera;
+        lines.push(format!(
+            "view {}: camera at ({:.0}, {:.0}, {:.0}) looking at ({:.0}, {:.0}, {:.0})",
+            v.name, c.eye.0, c.eye.1, c.eye.2, c.target.0, c.target.1, c.target.2
+        ));
+        images.push((v.name, jpg));
+    }
+    // the picture on the owner's game card: what a new player sees (else the whole map)
+    let card_cam = crate::render::spawn_camera(&scene).unwrap_or_else(|| crate::render::overview_camera(&scene));
+    if let Ok(jpg) = crate::render::jpeg(&crate::render::draw(&scene, card_cam, 640, 360), 640, 360) {
+        let _ = std::fs::write(dir.join(".roxai").join("card.jpg"), jpg);
+    }
+    // remember how this game's world is built, for the owner's preview picture
+    let _ = std::fs::write(dir.join(".roxai").join("render_setup.luau"), setup);
+    Ok(Render { images, text: lines.join("
+") })
+}
+
 /// Owner's Play button: build the game and make it the version the private test place runs. Returns the place id.
 pub fn play_upload(ctx: &Ctx, dir: &Path) -> Result<u64> {
     let c = crate::cloud::connection(ctx).ok_or_else(|| anyhow!("Connect your Roblox test place first (Settings → Game building)"))?;

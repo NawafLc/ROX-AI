@@ -32,6 +32,7 @@ pub fn defs() -> Vec<Value> {
           obj(json!({"path": s, "old": s, "new": s, "replace_all": {"type": "boolean"}}), &["path", "old", "new"])),
         t("project_delete", "Delete a project file.", obj(json!({"path": s}), &["path"])),
         t("project_search", "Search project files for text (case-insensitive). Returns path:line: text (up to 60 hits). path = only files whose path contains this text.", obj(json!({"query": s, "path": s}), &["query"])),
+        t("project_render", "See the game: pictures of its 3D world drawn on this PC from the built place. views: \"spawn\" (what a new player sees), \"overview\" (whole map from above at an angle), \"top\" (plan view) or {\"name\", \"eye\": [x,y,z], \"look_at\": [x,y,z]} (max 3 per call; default spawn + overview). setup: Luau that builds the world the way the server does at start-up (e.g. require(game.ServerScriptService.Server.WorldBuilder).build()); defaults to the last setup used for this game. Shows layout, scale, colours and what covers what (flat shading, no textures, no UI or text). Also reports problems like a buried spawn.", obj(json!({"views": {"type": "array", "items": {}}, "setup": s}), &[])),
         t("project_run", "Run a Luau snippet on this PC against the freshly built game and get what it prints (and its return value). require any ModuleScript, e.g. local C = require(game.ReplicatedStorage.Shared.Config). For quick checks, numbers and economy simulations; it changes no files. Never write failing tests just to print values.", obj(json!({"code": s}), &["code"])),
         t("project_build", "Build the place with Rojo, compile every script and run the unit tests (this PC). Run it after every change.", obj(json!({}), &[])),
         t("project_test", "Build, upload to the private test place and run all tests (including remoteOnly specs) on Roblox's servers, with the server output. Slower and rate limited: use it for real checks.", obj(json!({}), &[])),
@@ -170,6 +171,37 @@ fn board_text(dir: &Path, full: bool) -> String {
 }
 
 /// Run a team tool. None = not a team tool.
+/// project_render: pictures + text (images can't go through the plain-text tool path).
+pub fn render_call(ctx: &Ctx, a: &Value) -> Option<Result<(String, Vec<(String, Vec<u8>)>)>> {
+    agent_id()?;
+    Some((|| {
+        let dir = game(ctx)?;
+        let saved = std::fs::read_to_string(dir.join(".roxai").join("render_setup.luau")).unwrap_or_default();
+        let setup = match a.get("setup").and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => s.to_string(),
+            _ => saved,
+        };
+        let mut views: Vec<Value> = a.get("views").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        if views.is_empty() {
+            views = vec![json!("spawn"), json!("overview")];
+        }
+        views.truncate(3);
+        let t0 = std::time::Instant::now();
+        let r = loop {
+            match crate::pipeline::render_world(ctx, &dir, &setup, &views) {
+                Err(e) if e.to_string().contains("already running") && t0.elapsed().as_secs() < 600 => std::thread::sleep(std::time::Duration::from_secs(3)),
+                r => break r?,
+            }
+        };
+        let mut text = r.text;
+        if setup.trim().is_empty() {
+            text.push_str("
+(no setup: only parts in default.project.json are shown. If scripts build the world, pass setup.)");
+        }
+        Ok((text, r.images))
+    })())
+}
+
 pub fn call(ctx: &Ctx, name: &str, a: &Value) -> Option<Result<String>> {
     let me = agent_id()?;
     if !names().iter().any(|n| n == name) {
