@@ -259,7 +259,7 @@ pub fn create_tasks(ctx: &Ctx) -> Value {
     );
     if ctx.is_active() {
         let learn = task_xml(ctx, "ROX-AI: checks hourly if it's time for Claude to learn new chart games from YouTube videos, then does it (no screen use).", &s.playtest_check_time, "autopilot --scheduled", "PT11H", "PT20M",
-            "<Repetition><Interval>PT1H</Interval><Duration>PT12H</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>");
+            "<Repetition><Interval>PT1H</Interval><Duration>P1D</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>");
         out["Learning"] = json!(create_task(ctx, "Learning", &learn));
     } else {
         let _ = run_capture(
@@ -590,7 +590,7 @@ pub fn apply_auto_run(ctx: &Ctx) -> String {
             .store
             .get("tasks_exe")
             .and_then(|v| v.as_str().map(String::from));
-        let want = format!("{exe}|{}", ctx.settings.mode);
+        let want = format!("{exe}|{}|sched2", ctx.settings.mode); // bump the suffix when the task definitions change
         if current.as_deref() != Some(want.as_str())
             || task_status("Daily Chart Scan").is_none()
             || (ctx.is_active() == task_status("Learning").is_none())

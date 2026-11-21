@@ -532,8 +532,12 @@ pub fn run(ctx: &Ctx) -> Result<Value> {
             break;
         }
         if let Some(u) = paused_until(ctx) {
-            log.push(format!("taking a break until {u}"));
-            break;
+            // wait out Claude's usage break here (the PC stays awake) instead of relying on a scheduled wake-up
+            log.push(format!("took a break until {u}"));
+            while paused_until(ctx).is_some() && !stop_requested(ctx) {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+            continue;
         }
         if crate::autopilot::blocked(ctx).is_some_and(|b| b.to_lowercase().contains("claude")) {
             log.push("waiting for Claude sign-in".into());
@@ -589,15 +593,20 @@ pub fn run(ctx: &Ctx) -> Result<Value> {
             let hs: Vec<_> = batch.iter().map(|id| (id.clone(), sc.spawn(|| run_task(ctx, &dir, id)))).collect();
             hs.into_iter().map(|(id, h)| (id, h.join().unwrap_or_else(|_| Err(anyhow!("agent crashed"))))).collect()
         });
+        let mut usage_break = false;
         for (id, r) in results {
             if let Err(e) = r {
                 let m = format!("{e:#}");
                 crate::warn!("team task {id}: {m}");
-                if m.contains("USAGE:") || m.contains("sign in") {
+                if m.contains("sign in") {
                     log.push(m);
                     return Ok(json!({"status": "paused", "log": log}));
                 }
+                usage_break |= m.contains("USAGE:");
             }
+        }
+        if usage_break {
+            continue; // the top of the loop waits out the break, then building carries on
         }
         if stop_requested(ctx) {
             continue;
