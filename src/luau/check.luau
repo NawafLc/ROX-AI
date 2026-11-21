@@ -19,6 +19,16 @@ eachInstance(game, function(d)
 	end
 end)
 
+-- Roblox data types (Vector3, Color3, CFrame, UDim2, Enum, Instance, ...) like on a real server
+local function withRobloxTypes(env: { [string]: any }): { [string]: any }
+	for k, v in roblox :: any do
+		if type(k) == "string" and string.match(k, "^%u") then
+			env[k] = v
+		end
+	end
+	return env
+end
+
 -- Roblox-style require(ModuleScript) on top of the place file
 local cache = {}
 local function load(mod: Instance): any
@@ -26,7 +36,7 @@ local function load(mod: Instance): any
 	if cache[key] ~= nil then
 		return cache[key]
 	end
-	local env = { script = mod, game = game, workspace = game:FindFirstChild("Workspace") }
+	local env = withRobloxTypes({ script = mod, game = game, workspace = game:FindFirstChild("Workspace") })
 	env.require = function(target)
 		if type(target) == "userdata" and target.ClassName == "ModuleScript" then
 			return load(target)
