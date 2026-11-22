@@ -325,14 +325,14 @@ const PLAN_PROMPT: &str = r#"You are a senior Roblox game designer directing a g
 Write the shot list for THIS game. Use web search (the game's wiki, its Roblox page) to learn its real areas, menus, currencies and passes, so every step names real things ("open the Pets menu and scroll through every pet", not "open a menu").
 
 Rules:
-- 7 to 10 segments, 2 to 8 minutes each, about 40 minutes in total. The first segment is always the very first minutes as a brand new player, untouched.
+- 8 to 12 short segments, 1 to 3 minutes each (never more than 3), about 15 to 25 minutes in total. One segment = one focused thing; split big topics into several segments. The first segment is always the very first minutes as a brand new player, untouched.
 - Cover: first-time experience, core loop, every UI screen, shop and monetization (open each pass and product so the price is visible; never buy), progression and later goals, the whole map and level design, models/art/effects up close, and social or multiplayer features.
 - steps: 3 to 7 short instructions each (max 14 words), in order, specific to this game. Tell them where to pause the camera ("hold still 3 seconds on each screen") because frames are what gets studied.
 - look_for: 2 to 4 things the owner should notice and write notes about in that segment (feelings, confusion, what pulls them forward).
 - Never ask them to spend Robux, chat, trade or share personal information.
 
 Reply with ONLY this JSON, nothing else:
-{"segments":[{"title":"…","goal":"one sentence: what this segment teaches","steps":["…"],"minutes":5,"look_for":["…"]}]}
+{"segments":[{"title":"…","goal":"one sentence: what this segment teaches","steps":["…"],"minutes":2,"look_for":["…"]}]}
 "#;
 
 fn make_plan(id: &str) -> Result<Vec<Shot>> {
@@ -346,7 +346,11 @@ fn make_plan(id: &str) -> Result<Vec<Shot>> {
     if plan.len() < 3 {
         bail!("the plan was too short");
     }
-    Ok(plan)
+    // segments stay short: 1 to 3 minutes
+    Ok(plan.into_iter().map(|mut x| {
+        x.minutes = x.minutes.clamp(1.0, 3.0);
+        x
+    }).collect())
 }
 
 /// The shot list when the AI can't make a game-specific one.
@@ -359,13 +363,13 @@ pub fn default_plan(_g: &Game) -> Vec<Shot> {
         look_for: look.iter().map(|s| s.to_string()).collect(),
     };
     vec![
-        shot("First minutes", "What a brand new player sees and does first.", &["Start recording before the game finishes loading", "Play naturally, like a new player", "Read every popup and tutorial; pause 3 seconds on each"], 5.0, &["When you understood what to do", "Anything confusing"]),
-        shot("Core loop", "The thing players repeat and what it pays.", &["Play the main activity again and again", "Buy your first upgrade when you can", "Note how much each action earns"], 8.0, &["How it feels after 5 minutes", "What makes you want more"]),
-        shot("Every screen", "All menus and the UX.", &["Open every button and menu one by one", "Hold still 3 seconds on each screen", "Scroll slowly through long lists"], 5.0, &["Screens that are clear or messy"]),
-        shot("Shop and money", "What is sold, for how much, and where it's offered.", &["Open the shop and every pass and product", "Pause on each price", "Never buy anything"], 4.0, &["Where the game asks you to pay"]),
-        shot("The map", "Level design and areas.", &["Walk around the whole map slowly", "Look up and into the distance", "Show locked areas and what unlocking costs"], 6.0, &["What guides you where to go"]),
-        shot("Art and effects", "Models, materials, lighting, effects up close.", &["Get close to the best looking models", "Trigger effects (hits, rewards, upgrades)", "Turn the camera slowly around them"], 4.0, &["What makes it look good or cheap"]),
-        shot("Later goals", "Progression beyond the start.", &["Show the next goals (rebirth, new areas, quests)", "Open any progress or quest screen"], 4.0, &["What keeps players coming back"]),
+        shot("First minutes", "What a brand new player sees and does first.", &["Start recording before the game finishes loading", "Play naturally, like a new player", "Read every popup and tutorial; pause 3 seconds on each"], 3.0, &["When you understood what to do", "Anything confusing"]),
+        shot("Core loop", "The thing players repeat and what it pays.", &["Play the main activity again and again", "Buy your first upgrade when you can", "Note how much each action earns"], 3.0, &["How it feels after a few rounds", "What makes you want more"]),
+        shot("Every screen", "All menus and the UX.", &["Open every button and menu one by one", "Hold still 3 seconds on each screen", "Scroll slowly through long lists"], 3.0, &["Screens that are clear or messy"]),
+        shot("Shop and money", "What is sold, for how much, and where it's offered.", &["Open the shop and every pass and product", "Pause on each price", "Never buy anything"], 2.0, &["Where the game asks you to pay"]),
+        shot("The map", "Level design and areas.", &["Walk around the whole map slowly", "Look up and into the distance", "Show locked areas and what unlocking costs"], 3.0, &["What guides you where to go"]),
+        shot("Art and effects", "Models, materials, lighting, effects up close.", &["Get close to the best looking models", "Trigger effects (hits, rewards, upgrades)", "Turn the camera slowly around them"], 2.0, &["What makes it look good or cheap"]),
+        shot("Later goals", "Progression beyond the start.", &["Show the next goals (rebirth, new areas, quests)", "Open any progress or quest screen"], 2.0, &["What keeps players coming back"]),
     ]
 }
 

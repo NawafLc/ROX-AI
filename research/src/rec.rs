@@ -299,14 +299,14 @@ pub fn start(ffmpeg: &Path, out: &Path) -> Result<Recording> {
     let audio_tmp = dir.join(format!("{stem}.audio.wav"));
     let enc = encoder(ffmpeg);
     let src = format!("gfxcapture=hwnd={}:max_framerate=30,hwdownload,format=bgra", win.hwnd);
-    let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", &src, "-vf", "format=nv12,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-r", "30", "-c:v", enc]
+    let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", &src, "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic,format=nv12", "-r", "30", "-c:v", enc]
         .iter()
         .map(|s| s.to_string())
         .collect();
     if enc == "libx264" {
         args.extend(["-preset", "veryfast", "-crf", "23"].map(String::from));
     } else {
-        args.extend(["-b:v", "10M"].map(String::from));
+        args.extend(["-b:v", "6M"].map(String::from));
     }
     args.push(video_tmp.to_string_lossy().into());
     let started = Instant::now();
