@@ -74,6 +74,7 @@ export type Session = {
   current: number
   final_notes: string
   teardown: string
+  videos_deleted: boolean
 }
 export type SessionRow = { id: string; created: string; game: string; icon: string; status: Session['status']; step: string; segments: number; recorded: number; teardown: string }
 export type Status = { ffmpeg: boolean; claude: boolean; roblox: boolean; recording: { id: string; index: number; seconds: number } | null; vault: string }

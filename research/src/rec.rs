@@ -356,11 +356,16 @@ impl Recording {
             let _ = e.read_to_string(&mut err);
         }
         let audio_secs = self.audio.finish().ok();
-        if !self.video_tmp.is_file() || std::fs::metadata(&self.video_tmp).map(|m| m.len()).unwrap_or(0) == 0 {
-            bail!("The recording didn't work: {}", err.lines().last().unwrap_or("ffmpeg wrote nothing"));
-        }
         let ff = self.ffmpeg.to_string_lossy().to_string();
         let (v, a, o) = (self.video_tmp.to_string_lossy().to_string(), self.audio_tmp.to_string_lossy().to_string(), self.out.to_string_lossy().to_string());
+        // no picture at all (the game was minimized, or capture failed): don't save an empty segment
+        let has_picture = self.video_tmp.is_file() && video_seconds(&ff, &v).is_some_and(|s| s > 0.5);
+        if !has_picture {
+            let _ = std::fs::remove_file(&self.video_tmp);
+            let _ = std::fs::remove_file(&self.audio_tmp);
+            let why = err.lines().last().map(|l| format!(" ({l})")).unwrap_or_default();
+            bail!("Nothing was recorded{why}. Keep the Roblox window open on screen (not minimized) while you record, then record this segment again.");
+        }
         // the sound starts before ffmpeg's first frame; both stop together, so skip the difference at the start
         let skip = match (audio_secs, video_seconds(&ff, &v)) {
             (Some(a), Some(vs)) if a > vs => format!("{:.3}", (a - vs).min(5.0)),

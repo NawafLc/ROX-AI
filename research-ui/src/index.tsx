@@ -1,6 +1,6 @@
 import '@fontsource-variable/inter'
 import './styles.css'
-import { BookOpen, Clapperboard, FolderOpen, Search } from 'lucide-react'
+import { BookOpen, Clapperboard, FolderOpen, GraduationCap, Search } from 'lucide-react'
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { TitleBar } from './components/TitleBar'
@@ -10,6 +10,7 @@ import { HomePage } from './pages/Home'
 import { PlaybookPage } from './pages/Playbook'
 import { SessionPage } from './pages/Session'
 import { SessionsPage } from './pages/Sessions'
+import { StudiedGame, StudiedPage } from './pages/Studied'
 
 function useRoute() {
   const [r, setR] = useState(window.location.hash || '#/')
@@ -26,10 +27,12 @@ function App() {
   const { data: st } = useApi<Status>('status', {}, 3000)
   const nav = [
     { r: '#/', label: 'Study a game', icon: <Search className="size-4" />, on: route === '#/' },
-    { r: '#/sessions', label: 'Sessions', icon: <Clapperboard className="size-4" />, on: route.startsWith('#/s') },
+    { r: '#/sessions', label: 'Sessions', icon: <Clapperboard className="size-4" />, on: route === '#/sessions' || route.startsWith('#/s/') },
+    { r: '#/studied', label: 'Studied', icon: <GraduationCap className="size-4" />, on: route.startsWith('#/studied') },
     { r: '#/playbook', label: 'Playbook', icon: <BookOpen className="size-4" />, on: route === '#/playbook' },
   ]
   const sid = route.startsWith('#/s/') ? decodeURIComponent(route.slice(4)) : ''
+  const studied = route.startsWith('#/studied/') ? decodeURIComponent(route.slice(10)) : ''
   return (
     <div className="flex h-full flex-col">
       <TitleBar />
@@ -60,7 +63,7 @@ function App() {
         </aside>
         <main className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[1040px] px-8 py-7">
-            {sid ? <SessionPage key={sid} id={sid} status={st} /> : route === '#/sessions' ? <SessionsPage /> : route === '#/playbook' ? <PlaybookPage /> : <HomePage />}
+            {sid ? <SessionPage key={sid} id={sid} status={st} /> : studied ? <StudiedGame key={studied} id={studied} /> : route === '#/studied' ? <StudiedPage /> : route === '#/sessions' ? <SessionsPage /> : route === '#/playbook' ? <PlaybookPage /> : <HomePage />}
           </div>
         </main>
       </div>

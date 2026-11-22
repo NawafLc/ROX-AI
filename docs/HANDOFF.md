@@ -139,7 +139,14 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   5. The owner writes final notes and clicks **Push**:
      - contact sheets per segment;
      - Claude reads every frame with the owner's notes (`analysis/segNN.md`);
-     - a synthesis pass writes `ROX Research Vault\Teardowns\<Game>.md` with key frames copied to `attachments`.
+     - a synthesis pass writes `ROX Research Vault\Teardowns\<Game>.md`. It places 12 to 24 `SCREENSHOT: segNN @ m:ss`
+       lines. Each one becomes a full-size HD frame cut from that video into `Teardownsttachments\<session>`;
+     - then the segment videos and contact sheets are deleted (`videos_deleted`); the analysis and screenshots stay.
+
+  Recording is HD: the window is scaled to fit 1920×1080 at 6 Mbps. Shot lists have 8 to 12 segments of 1 to 3 minutes.
+  A segment with no picture (for example, a minimized window) is refused, and the segment goes back to ready.
+  Tabs: Study a game, Sessions, **Studied** (every game with a finished analysis, by name, opening the full
+  analysis), Playbook.
 
   Folders sit next to the exe: `ROX-Research Data` and `ROX Research Vault`. Override them with `ROXRESEARCH_HOME` /
   `ROXRESEARCH_VAULT`. **The vault's Playbook is new and deliberately not linked to ROX-AI's old Playbook.** It

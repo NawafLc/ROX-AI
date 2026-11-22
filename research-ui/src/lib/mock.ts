@@ -14,7 +14,9 @@ export async function mock(cmd: string, _args: Record<string, unknown>): Promise
     case 'session':
       return { session: s, dir: '' }
     case 'sessions':
-      return [{ id: s.id, created: s.created, game: s.game.name, icon: s.game.icon, status: s.status, step: '', segments: s.plan.length, recorded: 2, teardown: '' }]
+      return [{ id: s.id, created: s.created, game: s.game.name, icon: s.game.icon, status: s.status, step: '', segments: s.plan.length, recorded: 2, teardown: s.teardown }]
+    case 'teardown':
+      return { markdown: `# ${s.game.name}\n## Summary\nSample analysis text for checking the layout.\n## Core loop\nThrow food → animals grow → earn cash → upgrade.`, path: 'C:/vault/Teardowns/x.md' }
     case 'search':
       return [s.game]
     default:

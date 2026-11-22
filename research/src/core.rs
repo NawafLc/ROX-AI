@@ -231,6 +231,8 @@ pub struct Session {
     pub current: usize,
     pub final_notes: String,
     pub teardown: String,
+    /// the segment videos were deleted once the analysis was saved (screenshots stay in the vault)
+    pub videos_deleted: bool,
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -417,7 +419,14 @@ pub fn rec_stop(id: &str, notes: &str) -> Result<Value> {
     if sid != id {
         bail!("A different session is recording");
     }
-    let secs = r.finish()?;
+    let secs = match r.finish() {
+        Ok(s) => s,
+        Err(e) => {
+            // back to ready on the same segment, so it can be recorded again
+            let _ = update(id, |s| s.status = "ready".into());
+            return Err(e);
+        }
+    };
     let s = update(id, |s| {
         if let Some(seg) = s.segments.get_mut(index) {
             seg.file = segment_file(index);
@@ -513,11 +522,13 @@ fn teardown(id: &str) -> Result<()> {
             .enumerate()
             .map(|(k, f)| {
                 let t0 = k as f64 * 4.0 * every;
-                format!("- {folder}/{f}: {} to {} (4 frames, left→right, top→bottom, {every:.0} s apart)", clock(t0), clock(t0 + 4.0 * every))
+                let times: Vec<String> = (0..4).map(|j| clock(t0 + j as f64 * every)).collect();
+                format!("- {folder}/{f}: frames at {} (top-left, top-right, bottom-left, bottom-right)", times.join(", "))
             })
             .collect();
         let prompt = format!(
-            "{SEGMENT_PROMPT}\n\n## The game\n{}\n\n## Segment {}: {}\nGoal: {}\nWhat the owner was asked to do:\n{}\nWhat to look for: {}\n\n## The owner's notes on this segment\n{}\n\n## Frames ({} contact sheets; read every one, in order, with the Read tool)\n{}",
+            "{SEGMENT_PROMPT}\n\nThis is segment seg{:02}.\n\n## The game\n{}\n\n## Segment {}: {}\nGoal: {}\nWhat the owner was asked to do:\n{}\nWhat to look for: {}\n\n## The owner's notes on this segment\n{}\n\n## Frames ({} contact sheets; read every one, in order, with the Read tool; black tiles at the very end are padding past the end of the video, ignore them)\n{}",
+            i + 1,
             game_facts(&s.game),
             i + 1,
             shot.title,
@@ -545,7 +556,8 @@ fn teardown(id: &str) -> Result<()> {
         analyses.join("\n\n")
     );
     let md = claude(&prompt, &dir, "", 3, "high", Duration::from_secs(1800))?;
-    let md = attach_frames(&s, &dir, &md)?;
+    step(id, "Saving the screenshots");
+    let md = attach_frames(&ff, &s, &dir, &md)?;
     let name: String = s.game.name.chars().filter(|c| !"\\/:*?\"<>|#^[]".contains(*c)).collect();
     let path = vault().join("Teardowns").join(format!("{}.md", name.trim()));
     std::fs::create_dir_all(path.parent().unwrap())?;
@@ -558,13 +570,30 @@ fn teardown(id: &str) -> Result<()> {
         s.id
     );
     std::fs::write(&path, format!("{head}{md}"))?;
+    // the analysis and its screenshots are saved: the videos aren't needed any more
+    for g in &s.segments {
+        if !g.file.is_empty() {
+            let _ = std::fs::remove_file(dir.join(&g.file));
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir.join("frames"));
     update(id, |s| {
         s.status = "done".into();
         s.step.clear();
         s.teardown = path.to_string_lossy().into();
+        s.videos_deleted = true;
     })?;
     roxai::info!("teardown written: {}", path.display());
     Ok(())
+}
+
+/// "1:24" or "84" → seconds.
+fn parse_time(t: &str) -> Option<f64> {
+    let t = t.trim();
+    match t.split_once(':') {
+        Some((m, s)) => Some(m.trim().parse::<f64>().ok()? * 60.0 + s.trim().parse::<f64>().ok()?),
+        None => t.parse().ok(),
+    }
 }
 
 fn clock(secs: f64) -> String {
@@ -572,28 +601,40 @@ fn clock(secs: f64) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-/// Lines `KEYFRAME: frames/segNN/sheet_XXX.jpg | caption` → copy the image into the vault and embed it.
-fn attach_frames(s: &Session, dir: &Path, md: &str) -> Result<String> {
+/// Lines `SCREENSHOT: segNN @ m:ss | caption` → a full-size frame from that video, saved in the vault and embedded.
+fn attach_frames(ff: &Path, s: &Session, dir: &Path, md: &str) -> Result<String> {
     let att = vault().join("Teardowns").join("attachments").join(&s.id);
     let mut out = vec![];
     for line in md.lines() {
-        let t = line.trim();
-        if let Some(rest) = t.strip_prefix("KEYFRAME:") {
-            let (file, caption) = rest.split_once('|').unwrap_or((rest, ""));
-            let file = file.trim().trim_start_matches("./").replace('\\', "/");
-            let src = dir.join(&file);
-            if file.starts_with("frames/") && !file.contains("..") && src.is_file() {
-                std::fs::create_dir_all(&att)?;
-                let name = file.trim_start_matches("frames/").replace('/', "-");
-                std::fs::copy(&src, att.join(&name))?;
-                out.push(format!("![{}](attachments/{}/{})", caption.trim(), s.id, name));
-                if !caption.trim().is_empty() {
-                    out.push(format!("*{}*", caption.trim()));
-                }
-                continue;
-            }
+        let t = line.trim().trim_start_matches(['-', '*', ' ']);
+        let Some(rest) = t.strip_prefix("SCREENSHOT:").or_else(|| t.strip_prefix("KEYFRAME:")) else {
+            out.push(line.to_string());
+            continue;
+        };
+        // never leave a raw marker in the note, even when the frame can't be found
+        let (what, caption) = rest.split_once('|').unwrap_or((rest, ""));
+        let caption = caption.trim();
+        let Some((seg, at)) = what.split_once('@') else { continue };
+        let Ok(n) = seg.trim().to_lowercase().trim_start_matches("seg").parse::<usize>() else { continue };
+        let Some(video) = s.segments.get(n.wrapping_sub(1)).filter(|g| !g.file.is_empty()).map(|g| dir.join(&g.file)) else { continue };
+        let Some(secs) = parse_time(at) else { continue };
+        std::fs::create_dir_all(&att)?;
+        let name = format!("seg{n:02}-{:04}.jpg", secs as u64);
+        let dest = att.join(&name);
+        if !dest.is_file() {
+            let _ = roxai::util::run_capture(
+                &ff.to_string_lossy(),
+                &["-hide_banner", "-loglevel", "error", "-y", "-ss", &format!("{secs:.2}"), "-i", &video.to_string_lossy(), "-frames:v", "1", "-q:v", "3", &dest.to_string_lossy()],
+                Duration::from_secs(60),
+            );
         }
-        out.push(line.to_string());
+        if dest.is_file() {
+            out.push(format!("![{caption}](attachments/{}/{name})", s.id));
+            if !caption.is_empty() {
+                out.push(format!("*{caption}*"));
+            }
+            out.push(String::new());
+        }
     }
     Ok(out.join("\n"))
 }
@@ -613,7 +654,7 @@ Cover whatever this segment shows of:
 - Social: other players, leaderboards, trading, multiplayer features
 - What works well and why; what is weak
 
-End with "Notable frames": up to 6 lines `frames/segNN/sheet_XXX.jpg | what it shows` for the frames that best illustrate this segment. Reply with the Markdown only."#;
+End with "Notable frames": 4 to 10 lines `segNN @ m:ss | what it shows`, using the exact frame times listed for the sheets, for the moments that best illustrate this segment (every distinct UI screen, shop or offer, area of the map, model or effect worth seeing). Reply with the Markdown only."#;
 
 const TEARDOWN_PROMPT: &str = r#"You are a senior Roblox game designer. Write the definitive teardown of this game from the segment studies below (made from frame-by-frame study of a real play session) plus the Roblox data and the owner's notes. It will be the source of truth for learning how to make games like it, so it must be specific, numeric and honest. Do not invent anything that the studies or data don't support; mark inferences "(likely)".
 
@@ -633,7 +674,7 @@ Write Markdown with exactly these sections:
 ## Weaknesses
 ## Lessons for making our own games (8-15 concrete, reusable rules, each with the evidence from this game)
 
-Put key frames where they help, one per line, as: KEYFRAME: frames/segNN/sheet_XXX.jpg | caption (only frames named in the studies' "Notable frames"; at most 10 in total).
+Illustrate it with screenshots: every section from "The first 5 minutes" to "Social and retention" gets at least one, placed right where it supports the text, 12 to 24 in total. Each on its own line, exactly: SCREENSHOT: segNN @ m:ss | caption (only moments listed in the studies' "Notable frames").
 Reply with the Markdown only."#;
 
 // ------------------------------------------------------------------ Claude
@@ -772,6 +813,11 @@ pub fn call(cmd: &str, a: Value) -> Result<Value> {
         }
         "recording" => recording_state(),
         "push" => push(&s("id"), &s("notes"))?,
+        // check: turn SCREENSHOT lines into saved frames for a session whose videos still exist
+        "screenshots" => {
+            let x = load(&s("id"))?;
+            json!({"markdown": attach_frames(&ensure_ffmpeg()?, &x, &dir_of(&x.id), &s("markdown"))?})
+        }
         "teardown" => {
             let x = load(&s("id"))?;
             json!({"markdown": std::fs::read_to_string(&x.teardown).unwrap_or_default(), "path": x.teardown})

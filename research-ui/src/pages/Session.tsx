@@ -179,7 +179,14 @@ function SegmentCard({ s, dir, i, shotTitle }: { s: Session; dir: string; i: num
     <Card className={cx('overflow-hidden', isNext && !g?.file && 'border-sky/40')}>
       <div className="flex gap-4 p-4">
         <div className="w-[300px] shrink-0">
-          {g?.file ? (
+          {g?.file && s.videos_deleted ? (
+            <div className="grid aspect-video w-full place-items-center rounded-lg border border-line bg-panel text-center">
+              <div>
+                <CheckCircle2 className="mx-auto size-5 text-brand" />
+                <div className="mt-1.5 px-4 text-[12px] text-mute">Studied. The video was deleted; its screenshots are in the analysis.</div>
+              </div>
+            </div>
+          ) : g?.file ? (
             <video src={fileUrl(join(dir, g.file))} controls preload="metadata" className="aspect-video w-full rounded-lg bg-black ring-1 ring-line" />
           ) : (
             <div className="grid aspect-video w-full place-items-center rounded-lg border border-dashed border-line-2 bg-panel text-center">
@@ -281,17 +288,12 @@ function PushCard({ s, filmed, reload }: { s: Session; filmed: number; reload: (
   )
 }
 
-function Teardown({ id }: { id: string }) {
+export function Teardown({ id }: { id: string }) {
   const { data } = useApi<{ markdown: string; path: string }>('teardown', { id })
   if (!data) return <Skeleton className="h-60" />
   const base = data.path.replace(/[\\/][^\\/]*$/, '')
   return (
-    <Card className="p-7">
-      <div className="mb-4 flex justify-end">
-        <Button kind="ghost" size="sm" icon={<FolderOpen className="size-4" />} onClick={() => call('open', { what: 'teardown', id })}>
-          Open note
-        </Button>
-      </div>
+    <Card className="p-8">
       <Markdown body={data.markdown.replace(/^---[\s\S]*?\n---\n/, '')} base={base} />
     </Card>
   )
