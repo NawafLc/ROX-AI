@@ -140,7 +140,7 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
      - contact sheets per segment;
      - Claude reads every frame with the owner's notes (`analysis/segNN.md`);
      - a synthesis pass writes `ROX Research Vault\Teardowns\<Game>.md`. It places 12 to 24 `SCREENSHOT: segNN @ m:ss`
-       lines. Each one becomes a full-size HD frame cut from that video into `Teardownsttachments\<session>`;
+       lines. Each one becomes a full-size HD frame cut from that video into `Teardowns\attachments\<session>`;
      - then the segment videos and contact sheets are deleted (`videos_deleted`); the analysis and screenshots stay.
 
   Recording is HD: the window is scaled to fit 1920×1080 at 6 Mbps. Shot lists have 8 to 12 segments of 1 to 3 minutes.
