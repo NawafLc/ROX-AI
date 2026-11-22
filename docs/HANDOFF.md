@@ -121,6 +121,39 @@ the latest release. Latest at handoff: **v2.1.13** (M0 + M1 done).
   - App: Team page (Start building / Pause, game in progress with live tasks + activity, Lead chat, games to build,
     size cap small/medium (large off), pace one-at-a-time/all-at-once, member cards with model picker), My Games
     cards with the Lead's summary and a working Feedback box (Play/Publish arrive in M5).
+- **Pivot (2026-11-21): game building paused, research first.** The owner played *Skip a Stone!* and judged it
+  not good enough: no style, unclear core loop, no level design, no models. The team stays off until the knowledge
+  is much deeper. Research moves into its own app.
+- **ROX Research (`ROX-Research.exe`, crates `research/` + `research-ui/`).** The owner films Roblox games themself:
+  1. They pick a game (name, link or place id).
+  2. Claude, with WebSearch, writes a shot list: segments, each with steps, "must show" points and minutes
+     (`core::make_plan`).
+  3. A guide window floats over Roblox (`overlay.html`, always on top, compact mode). Windows hides it from capture
+     with `WDA_EXCLUDEFROMCAPTURE`, so it never appears in a video. It shows what to do, a timer, Start/Finish/Skip
+     and a notes box per segment.
+  4. Each segment is its own `segNN.mp4`:
+     - video: only the Roblox window (ffmpeg `gfxcapture hwnd=`; NVENC→AMF→QSV→MF→x264);
+     - sound: only the game's audio (WASAPI process loopback);
+     - the two are joined with the lead-in trimmed.
+     ffmpeg is downloaded into `ROX-Research Data\tools` on first start.
+  5. The owner writes final notes and clicks **Push**:
+     - contact sheets per segment;
+     - Claude reads every frame with the owner's notes (`analysis/segNN.md`);
+     - a synthesis pass writes `ROX Research Vault\Teardowns\<Game>.md` with key frames copied to `attachments`.
+
+  Folders sit next to the exe: `ROX-Research Data` and `ROX Research Vault`. Override them with `ROXRESEARCH_HOME` /
+  `ROXRESEARCH_VAULT`. **The vault's Playbook is new and deliberately not linked to ROX-AI's old Playbook.** It
+  starts empty and grows from teardowns. Turning teardowns into Playbook pages is the next step.
+
+  CLI for checks: `ROX-Research.exe <command> '<json>'` (status, search, session_new, rec_test, push…).
+
+  Test switches:
+  - `ROXRESEARCH_TEST_EXE` records another app instead of Roblox.
+  - `ROXRESEARCH_ROUTE` / `ROXRESEARCH_OVERLAY` open a page or the guide without clicks.
+  - `ROXRESEARCH_GUIDE_VISIBLE` lets checks capture the guide.
+  - The UI runs in a browser with sample data: `npm run dev` in `research-ui` with `VITE_MOCK` set to a `session.json` URL (dev only).
+
+  Not yet verified on the owner's PC: recording a real Roblox window and its sound (needs them in a game).
 - Then M4 Market ideas, M5 invisible Studio + My Games Play/Feedback/Publish, M6 Create + Library, M7 Live ops,
   M8 Promo, M9 iPhone.
 

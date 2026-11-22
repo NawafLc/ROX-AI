@@ -62,6 +62,9 @@ jobs:
       - name: Build interface
         working-directory: ui
         run: npm ci && npm run build
+      - name: Build ROX Research interface
+        working-directory: research-ui
+        run: npm ci && npm run build
       - name: Tests
         run: cargo test -p roxai
       - name: Build release (app + command-line helper)
@@ -79,7 +82,7 @@ jobs:
         run: |
           $d = "dist\ROX-AI"
           New-Item -ItemType Directory -Force -Path $d | Out-Null
-          Copy-Item target\release\ROX-AI.exe, target\release\roxai.exe, dist-files\README.txt $d
+          Copy-Item target\release\ROX-AI.exe, target\release\roxai.exe, target\release\ROX-Research.exe, dist-files\README.txt $d
           Compress-Archive -Path $d -DestinationPath dist\ROX-AI-windows-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
@@ -192,7 +195,7 @@ jobs:
         with:
           name: ROX-AI-windows-x64
       - name: Single-file download too
-        run: unzip -j ROX-AI-windows-x64.zip 'ROX-AI/ROX-AI.exe' -d .
+        run: unzip -j ROX-AI-windows-x64.zip 'ROX-AI/ROX-AI.exe' 'ROX-AI/ROX-Research.exe' -d .
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.1.${{ github.run_number }}
@@ -202,7 +205,9 @@ jobs:
           files: |
             ROX-AI-windows-x64.zip
             ROX-AI.exe
+            ROX-Research.exe
           body: |
             **Download `ROX-AI.exe` and double-click it** — a setup wizard walks you through everything. Portable: nothing is installed into Windows.
             (`ROX-AI-windows-x64.zip` has the same app plus a command-line helper.)
+            **`ROX-Research.exe`** is the research app: pick a Roblox game, film it with an on-screen guide, write notes, push. Its Playbook is new and separate.
             Built from ${{ github.sha }} (branch ${{ github.ref_name }}). Tested on Windows: unit/integration tests, Win32 self-test, portable first start, MCP handshake, removal.

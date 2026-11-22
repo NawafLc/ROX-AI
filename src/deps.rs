@@ -206,7 +206,7 @@ pub(crate) fn agent() -> Result<ureq::Agent> {
 }
 
 /// Download with a progress bar into the temp folder.
-pub(crate) fn download(url: &str, file: &str, name: &str, report: Report) -> Result<PathBuf> {
+pub fn download(url: &str, file: &str, name: &str, report: Report) -> Result<PathBuf> {
     use std::io::{Read, Write};
     report(&format!("Downloading {name}…"), Some(0.0));
     let resp = agent()?

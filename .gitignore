@@ -9,3 +9,5 @@ build/
 target/
 app/gen/
 ui/tsconfig.tsbuildinfo
+research/gen/
+research-ui/tsconfig.tsbuildinfo
